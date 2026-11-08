@@ -207,7 +207,7 @@ async function decide(btn, kind) {
   const {error} = await sb.from('reservations').update(up).eq('id', id);
   if (error) return msg(err(error), 1);
   const f = await sb.functions.invoke('sync-calendar', {body: {reservation_id: id}});
-  f.error ? msg('Guardado, pero Google Calendar no se actualizó (función "sync-calendar" aún no configurada).', 1) : msg('Listo.');
+  f.error ? msg('Guardado, pero no se pudo actualizar Google Calendar. Revise el ID del calendario y que esté compartido con la cuenta de servicio.', 1) : msg('Listo.');
   adminView();
 }
 
