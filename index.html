@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reserva de salas y recursos</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+:root{color-scheme:light dark;--bg:#f4f6f8;--card:#fff;--ink:#1c2630;--mut:#5d6b78;--line:#d8dee4;--ac:#1b5fa8;--ok:#1f7a4d;--bad:#b3402f;--warn:#9a6a00}
+@media(prefers-color-scheme:dark){:root{--bg:#141a20;--card:#1d252d;--ink:#e6ebf0;--mut:#9aa8b5;--line:#33404c;--ac:#6aa8e8;--ok:#5cc08a;--bad:#e8806e;--warn:#e0b04a}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:860px;margin:0 auto;padding:16px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+h1{font-size:1.3rem;margin:0}h2{font-size:1.15rem;margin:0 0 8px}h3{font-size:1rem;margin:16px 0 6px}
+nav{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+nav button{background:none;color:var(--ink);border:1px solid var(--line)}nav button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:12px}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+label{display:block;font-size:.9rem;color:var(--mut);margin-bottom:8px}
+input,select,textarea{display:block;width:100%;margin-top:2px;padding:8px;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px}
+input[type=checkbox]{display:inline-block;width:auto;margin:0 6px 0 0}
+button{font:inherit;padding:8px 14px;border-radius:6px;border:1px solid var(--ac);background:var(--ac);color:#fff;cursor:pointer}
+button.sec{background:none;color:var(--ink);border-color:var(--line)}
+:focus-visible{outline:3px solid var(--ac);outline-offset:2px}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line);color:var(--ink);font-size:1rem}
+.row:last-child{border:0}.row .tag{margin-left:auto}
+.tag{font-size:.82rem;padding:2px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
+.available,.approved{color:var(--ok)}.booked,.blackout,.inactive,.rejected,.cancelled{color:var(--bad)}.pending{color:var(--warn)}
+.chip{display:inline-block;margin-right:12px}small,.muted{color:var(--mut)}
+#msg{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:92%;padding:10px 16px;border-radius:8px;color:#fff;z-index:9}
+#msg.ok{background:var(--ok)}#msg.bad{background:var(--bad)}
+</style>
+</head>
+<body>
+<main id="app">Cargando…</main>
+<div id="msg" role="status" hidden></div>
+<script>
+/* ============ 1. CONFIGURACIÓN (lo único que debe editar para empezar) ============ */
+const SUPABASE_URL = 'https://TU-PROYECTO.supabase.co';
+const SUPABASE_ANON_KEY = 'TU-CLAVE-ANON-PUBLICA';
+
+/* ============ 2. TEXTOS (se pueden cambiar sin riesgo) ============ */
+const TITLE = 'Reserva de salas y recursos';
+const LBL = {available:'Disponible', booked:'Ocupado', blackout:'No disponible (bloqueo)', inactive:'Deshabilitado',
+  pending:'Pendiente', approved:'Aprobada', rejected:'Rechazada', cancelled:'Cancelada'};
+const ERR = {invalid_time:'El horario no es válido o ya pasó.', no_spaces:'Elija al menos una sala o recurso.',
+  profile_incomplete:'Complete su nombre y teléfono.', too_many_pending:'Tiene demasiadas solicitudes pendientes.',
+  unavailable:'Alguno de los espacios ya no está disponible en ese horario.', not_authenticated:'Inicie sesión.',
+  exclusion:'Ese horario choca con otra reserva aprobada.'};
+
+/* ============ 3. UTILIDADES ============ */
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = d => new Date(d).toLocaleString('es', {dateStyle:'medium', timeStyle:'short'});
+const loc = d => { const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0,16); };
+const iso = v => new Date(v).toISOString();
+const err = e => { const m = e.message || ''; const k = Object.keys(ERR).find(k => m.includes(k)); return k ? ERR[k] : m; };
+const S = {tab:'new', spaces:[], features:[], profile:null, admin:false, user:null, res:{}};
+function msg(t, bad) {
+  const m = $('#msg'); m.textContent = t; m.className = bad ? 'bad' : 'ok'; m.hidden = false;
+  clearTimeout(msg.t); msg.t = setTimeout(() => m.hidden = true, 6000);
+}
+const names = r => (r.reservation_items || []).map(i => i.spaces?.name || 'Espacio').join(', ');
+const feats = s => { const f = (s.space_features || []).map(x => x.features.name + (x.detail ? ' ' + x.detail : '')).join(', '); return f ? ' · ' + esc(f) : ''; };
+
+/* ============ 4. INICIO DE SESIÓN ============ */
+sb.auth.onAuthStateChange((_e, s) => {
+  if (!S.started || (s?.user?.id || null) !== (S.user?.id || null)) { S.started = 1; start(s); }
+});
+
+function loginView() {
+  $('#app').innerHTML = `<div class="card"><h1>${TITLE}</h1><p class="muted">Inicie sesión para solicitar una reserva.</p>
+  <button data-act="google">Continuar con Google</button>
+  <h3>Otro proveedor de correo</h3>
+  <form id="lf"><label>Correo electrónico<input type="email" id="em" required></label><button>Enviar enlace de acceso</button></form></div>`;
+  $('#lf').onsubmit = async e => {
+    e.preventDefault();
+    const r = await sb.auth.signInWithOtp({email: $('#em').value.trim(), options: {emailRedirectTo: location.href.split('#')[0]}});
+    r.error ? msg(err(r.error), 1) : msg('Revise su correo y abra el enlace para entrar.');
+  };
+}
+
+async function loadBase() {
+  const [sp, ft, pf, ad] = await Promise.all([
+    sb.from('spaces').select('*, space_features(feature_id, detail, features(name))').order('name'),
+    sb.from('features').select('*').order('name'),
+    sb.from('profiles').select('*').eq('user_id', S.user.id).maybeSingle(),
+    sb.from('admins').select('user_id').eq('user_id', S.user.id).maybeSingle()]);
+  S.spaces = sp.data || []; S.features = ft.data || []; S.profile = pf.data; S.admin = !!ad.data;
+}
+
+async function start(session) {
+  S.user = session?.user || null;
+  if (!S.user) return loginView();
+  await loadBase();
+  shell();
+}
+
+/* ============ 5. ESTRUCTURA Y PESTAÑAS ============ */
+function shell() {
+  const tabs = [['new','Nueva solicitud'], ['mine','Mis reservas']];
+  if (S.admin) tabs.push(['admin','Administración']);
+  $('#app').innerHTML = `<header><h1>${TITLE}</h1><span class="muted">${esc(S.user.email)} <button class="sec" data-act="out">Salir</button></span></header>
+  <nav>${tabs.map(t => `<button data-act="tab" data-t="${t[0]}" class="${S.tab === t[0] ? 'on' : ''}">${t[1]}</button>`).join('')}</nav><section id="view"></section>`;
+  ({new:newView, mine:mineView, admin:adminView})[S.tab]();
+}
+
+/* ============ 6. NUEVA SOLICITUD ============ */
+function newView() {
+  const p = S.profile || {};
+  $('#view').innerHTML = `<form id="f" class="card"><h2>Nueva solicitud</h2>
+  <div class="g"><label>Nombre completo<input id="nm" required value="${esc(p.full_name)}"></label>
+  <label>Teléfono<input id="ph" required value="${esc(p.phone)}"></label></div>
+  <div class="g"><label>Fecha<input type="date" id="dt" required></label><label>Hora de inicio<input type="time" id="t1" required></label>
+  <label>Hora de fin<input type="time" id="t2" required></label><label>Asistentes<input type="number" id="at" min="1"></label></div>
+  <label>Motivo de la reunión<textarea id="pp" rows="2"></textarea></label>
+  <h3>Salas y recursos</h3><div id="av" class="muted">Elija fecha y horario para ver qué está disponible.</div><br>
+  <button>Enviar solicitud</button></form>`;
+  ['dt','t1','t2'].forEach(i => $('#' + i).onchange = avail);
+  $('#f').onsubmit = submit;
+}
+function range() {
+  const d = $('#dt').value, a = $('#t1').value, b = $('#t2').value;
+  if (!d || !a || !b) return [];
+  const s = new Date(d + 'T' + a), e = new Date(d + 'T' + b);
+  return e > s ? [s.toISOString(), e.toISOString()] : [];
+}
+async function avail() {
+  const [a, b] = range(), box = $('#av');
+  if (!a) { box.textContent = 'Revise que la hora de fin sea posterior a la de inicio.'; return; }
+  box.textContent = 'Consultando…';
+  const act = S.spaces.filter(s => s.active);
+  const st = await Promise.all(act.map(s => sb.rpc('check_availability', {p_space: s.id, p_start: a, p_end: b}).then(r => r.data)));
+  box.innerHTML = act.map((s, i) => `<label class="row"><input type="checkbox" name="sp" value="${s.id}" ${st[i] !== 'available' ? 'disabled' : ''}>
+  <b>${esc(s.name)}</b><small>${s.kind === 'room' ? 'Sala' : 'Recurso'}${s.capacity ? ' · ' + s.capacity + ' personas' : ''}${feats(s)}</small>
+  <span class="tag ${st[i]}">${LBL[st[i]] || st[i]}</span></label>`).join('') || 'No hay salas ni recursos habilitados.';
+}
+async function submit(e) {
+  e.preventDefault();
+  const [a, b] = range();
+  if (!a) return msg('Revise la fecha y las horas.', 1);
+  const ids = [...document.querySelectorAll('[name=sp]:checked')].map(x => x.value);
+  if (!ids.length) return msg(ERR.no_spaces, 1);
+  const pf = {user_id: S.user.id, email: S.user.email, full_name: $('#nm').value.trim(), phone: $('#ph').value.trim(), updated_at: new Date().toISOString()};
+  let r = await sb.from('profiles').upsert(pf);
+  if (r.error) return msg(err(r.error), 1);
+  S.profile = pf;
+  r = await sb.rpc('submit_reservation', {p_purpose: $('#pp').value, p_attendees: +$('#at').value || null, p_start: a, p_end: b, p_space_ids: ids});
+  if (r.error) return msg(err(r.error), 1);
+  msg('Solicitud enviada. Queda pendiente de revisión.');
+  S.tab = 'mine'; shell();
+}
+
+/* ============ 7. MIS RESERVAS ============ */
+async function mineView() {
+  $('#view').textContent = 'Cargando…';
+  const {data, error} = await sb.from('reservations').select('*, reservation_items(spaces(name))').eq('requester_id', S.user.id).order('starts_at', {ascending: false});
+  if (error) return msg(err(error), 1);
+  $('#view').innerHTML = (data || []).map(r => `<div class="card"><span class="tag ${r.status}">${LBL[r.status]}</span>
+  <h3>${esc(names(r))}</h3><div>${fmt(r.starts_at)} a ${fmt(r.ends_at)}</div>
+  ${r.was_modified ? '<small>La administración ajustó el horario o los datos solicitados.</small><br>' : ''}
+  ${r.admin_note ? '<small>Nota: ' + esc(r.admin_note) + '</small>' : ''}</div>`).join('') || '<p class="muted">Aún no tiene solicitudes. Cree la primera en "Nueva solicitud".</p>';
+}
+
+/* ============ 8. ADMINISTRACIÓN ============ */
+async function adminView() {
+  $('#view').textContent = 'Cargando…';
+  const now = new Date().toISOString();
+  const [rs, bl] = await Promise.all([
+    sb.from('reservations').select('*, reservation_items(spaces(name))').in('status', ['pending', 'approved']).gte('ends_at', now).order('starts_at'),
+    sb.from('blackouts').select('*, spaces(name)').gte('ends_at', now).order('starts_at')]);
+  const list = rs.data || [];
+  S.res = Object.fromEntries(list.map(r => [r.id, r]));
+  const rc = r => `<div class="card" data-id="${r.id}"><span class="tag ${r.status}">${LBL[r.status]}</span>
+  <b>${esc(r.requester_name)}</b> <small>${esc(r.requester_email)} · ${esc(r.requester_phone || '')}</small>
+  <div>${esc(names(r))} <small>· ${r.attendees || '?'} personas</small></div><p>${esc(r.purpose || '')}</p>
+  <div class="g"><label>Inicio<input type="datetime-local" class="s" value="${loc(r.starts_at)}"></label>
+  <label>Fin<input type="datetime-local" class="e" value="${loc(r.ends_at)}"></label>
+  <label>Nota para la persona<input class="n" value="${esc(r.admin_note)}"></label></div>
+  ${r.status === 'pending' ? '<button data-act="ok">Aprobar</button> <button class="sec" data-act="no">Rechazar</button>'
+    : '<button data-act="ok">Guardar cambios</button> <button class="sec" data-act="no">Cancelar reserva</button>'}</div>`;
+  const pend = list.filter(r => r.status === 'pending'), appr = list.filter(r => r.status === 'approved');
+  $('#view').innerHTML = `<h2>Solicitudes pendientes</h2>${pend.map(rc).join('') || '<p class="muted">No hay solicitudes pendientes.</p>'}
+  <h2>Reservas aprobadas próximas</h2>${appr.map(rc).join('') || '<p class="muted">No hay reservas aprobadas próximas.</p>'}
+  <div class="card"><h2>Salas y recursos</h2>
+  ${S.spaces.map(s => `<div class="row"><b>${esc(s.name)}</b><small>${s.kind === 'room' ? 'Sala' : 'Recurso'}${feats(s)}</small>
+  <span class="tag ${s.active ? 'available' : 'inactive'}">${s.active ? 'Habilitado' : 'Deshabilitado'}</span>
+  <button class="sec" data-act="ed" data-id="${s.id}">Editar</button></div>`).join('')}
+  <br><button data-act="ed" data-id="new">Agregar sala o recurso</button><div id="ef"></div></div>
+  <div class="card"><h2>Bloqueos por periodo</h2>
+  <div class="g"><label>Espacio<select id="bs">${S.spaces.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label>
+  <label>Desde<input type="datetime-local" id="b1"></label><label>Hasta<input type="datetime-local" id="b2"></label>
+  <label>Motivo<input id="br"></label></div><button data-act="bo">Bloquear periodo</button>
+  ${(bl.data || []).map(b => `<div class="row"><b>${esc(b.spaces?.name)}</b><small>${fmt(b.starts_at)} a ${fmt(b.ends_at)} ${esc(b.reason || '')}</small>
+  <button class="sec" data-act="bd" data-id="${b.id}">Quitar</button></div>`).join('')}</div>`;
+}
+
+async function decide(btn, kind) {
+  const card = btn.closest('.card'), id = card.dataset.id, r = S.res[id];
+  const s = iso(card.querySelector('.s').value), e = iso(card.querySelector('.e').value);
+  const up = {admin_note: card.querySelector('.n').value || null, decided_by: S.user.id, decided_at: new Date().toISOString()};
+  if (kind === 'ok') {
+    const changed = new Date(s) - new Date(r.starts_at) || new Date(e) - new Date(r.ends_at);
+    Object.assign(up, {status: 'approved', starts_at: s, ends_at: e, was_modified: r.was_modified || !!changed});
+  } else up.status = r.status === 'pending' ? 'rejected' : 'cancelled';
+  const {error} = await sb.from('reservations').update(up).eq('id', id);
+  if (error) return msg(err(error), 1);
+  const f = await sb.functions.invoke('sync-calendar', {body: {reservation_id: id}});
+  f.error ? msg('Guardado, pero Google Calendar no se actualizó (función "sync-calendar" aún no configurada).', 1) : msg('Listo.');
+  adminView();
+}
+
+function editSpace(id) {
+  const s = S.spaces.find(x => x.id === id) || {active: true, kind: 'room', space_features: []};
+  const have = new Set(s.space_features.map(x => x.feature_id));
+  $('#ef').innerHTML = `<form id="sf" class="card" data-id="${s.id || ''}"><div class="g">
+  <label>Nombre<input id="sn" required value="${esc(s.name)}"></label>
+  <label>Tipo<select id="sk"><option value="room" ${s.kind === 'room' ? 'selected' : ''}>Sala</option><option value="resource" ${s.kind === 'resource' ? 'selected' : ''}>Recurso</option></select></label>
+  <label>Capacidad<input id="sc" type="number" value="${s.capacity ?? ''}"></label></div>
+  <label>ID del calendario de Google<input id="sg" value="${esc(s.google_calendar_id)}"></label>
+  <label>Descripción<input id="sd" value="${esc(s.description)}"></label>
+  <label><input type="checkbox" id="sa" ${s.active ? 'checked' : ''}>Habilitado para reservas</label>
+  <div>${S.features.map(f => `<label class="chip"><input type="checkbox" name="ft" value="${f.id}" ${have.has(f.id) ? 'checked' : ''}>${esc(f.name)}</label>`).join('')}</div>
+  <label>Agregar característica nueva<input id="nf" placeholder="Ej. Pizarra"></label><button>Guardar cambios</button></form>`;
+  $('#sf').onsubmit = saveSpace;
+}
+async function saveSpace(e) {
+  e.preventDefault();
+  const id = e.target.dataset.id;
+  const row = {name: $('#sn').value.trim(), kind: $('#sk').value, capacity: +$('#sc').value || null, google_calendar_id: $('#sg').value.trim() || null,
+    description: $('#sd').value.trim() || null, active: $('#sa').checked};
+  const r = id ? await sb.from('spaces').update(row).eq('id', id).select().single() : await sb.from('spaces').insert(row).select().single();
+  if (r.error) return msg(err(r.error), 1);
+  const fids = [...document.querySelectorAll('[name=ft]:checked')].map(x => +x.value), nf = $('#nf').value.trim();
+  if (nf) { const f = await sb.from('features').upsert({name: nf}, {onConflict: 'name'}).select().single(); if (f.data) fids.push(f.data.id); }
+  await sb.from('space_features').delete().eq('space_id', r.data.id);
+  if (fids.length) await sb.from('space_features').insert([...new Set(fids)].map(f => ({space_id: r.data.id, feature_id: f})));
+  await loadBase(); msg('Guardado.'); adminView();
+}
+
+/* ============ 9. ACCIONES (botones) ============ */
+const acts = {
+  google: () => sb.auth.signInWithOAuth({provider: 'google', options: {redirectTo: location.origin + location.pathname}}),
+  out: () => sb.auth.signOut(),
+  tab: b => { S.tab = b.dataset.t; shell(); },
+  ok: b => decide(b, 'ok'),
+  no: b => decide(b, 'no'),
+  ed: b => editSpace(b.dataset.id),
+  bo: async () => {
+    const s = $('#bs').value, a = $('#b1').value, b = $('#b2').value;
+    if (!s || !a || !b) return msg('Complete el espacio y las fechas.', 1);
+    const {error} = await sb.from('blackouts').insert({space_id: s, starts_at: iso(a), ends_at: iso(b), reason: $('#br').value || null});
+    error ? msg(err(error), 1) : adminView();
+  },
+  bd: async b => { await sb.from('blackouts').delete().eq('id', b.dataset.id); adminView(); }
+};
+document.addEventListener('click', e => { const b = e.target.closest('[data-act]'); if (b) acts[b.dataset.act]?.(b); });
+</script>
+</body>
+</html>
