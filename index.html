@@ -27,6 +27,8 @@ button.sec{background:none;color:var(--ink);border-color:var(--line)}
 .tag{font-size:.82rem;padding:2px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
 .available,.approved{color:var(--ok)}.booked,.blackout,.inactive,.calendar_busy,.rejected,.cancelled{color:var(--bad)}.row.off{opacity:.6}.row.off .tag{color:var(--mut)}.pending{color:var(--warn)}
 .chip{display:inline-block;margin-right:12px}details{margin:6px 0 12px}summary{cursor:pointer;color:var(--ac)}.pick{padding:8px 0}small,.muted{color:var(--mut)}
+dialog{font:inherit;border:1px solid var(--line);border-radius:10px;padding:20px;width:min(420px,92vw);background:var(--card);color:var(--ink)}
+dialog::backdrop{background:rgba(0,0,0,.45)}dialog h3{margin:0 0 12px;font-size:1.1rem}.dl{margin-bottom:18px;line-height:1.6}.da{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 #msg{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:92%;padding:10px 16px;border-radius:8px;color:#fff;z-index:9}
 #msg.ok{background:var(--ok)}#msg.bad{background:var(--bad)}
 </style>
@@ -57,6 +59,21 @@ const fmt = d => new Date(d).toLocaleString('es', {dateStyle:'medium', timeStyle
 const loc = d => { const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0,16); };
 const iso = v => new Date(v).toISOString();
 const err = e => { const m = e.message || ''; const k = Object.keys(ERR).find(k => m.includes(k)); return k ? ERR[k] : m; };
+/* Ventana de confirmación propia (la del navegador siempre muestra el nombre del sitio como título) */
+function ask(question, lines, okText, noText) {
+  return new Promise(res => {
+    const d = document.createElement('dialog');
+    d.innerHTML = `<form method="dialog"><h3>${esc(question)}</h3><div class="dl">${lines.map(l => `<div>${esc(l)}</div>`).join('')}</div>
+      <div class="da"><button value="no" class="sec">${esc(noText || 'Volver')}</button><button value="ok">${esc(okText || 'Aceptar')}</button></div></form>`;
+    d.addEventListener('close', () => { res(d.returnValue === 'ok'); d.remove(); });
+    document.body.appendChild(d); d.showModal();
+  });
+}
+const MES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+const dia = d => { d = new Date(d); return d.getDate() + ' de ' + MES[d.getMonth()] + ', ' + d.getFullYear(); };
+const hora = d => new Date(d).toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit'}).replace(/\s?([AP])M/i, (m, x) => ' ' + x.toLowerCase() + 'm');
+const when = (a, b) => dia(a) === dia(b) ? ['Fecha: ' + dia(a), 'Horario: ' + hora(a) + ' a ' + hora(b)] : ['Desde: ' + dia(a) + ', ' + hora(a), 'Hasta: ' + dia(b) + ', ' + hora(b)];
+const spaceLine = s => (s?.kind === 'resource' ? 'Recurso ' : 'Sala ') + (s?.name || '');
 const S = {tab:'new', spaces:[], features:[], profile:null, admin:false, user:null, res:{}};
 function msg(t, bad) {
   const m = $('#msg'); m.textContent = t; m.className = bad ? 'bad' : 'ok'; m.hidden = false;
@@ -177,8 +194,11 @@ async function submit(e) {
   if (!ids.length) return msg(ERR.no_spaces, 1);
   const cal = await calendarBusy(a, b); // revisión final por si alguien reservó mientras tanto
   if (cal && ids.some(i => cal[i])) return msg('Alguno de los espacios ya tiene una reserva en ese horario. Vuelva a elegir.', 1);
-  const ed = S.edit, chosen = S.spaces.filter(s => ids.includes(s.id)).map(s => s.name).join(', ');
-  if (!confirm((ed ? '¿Guardar los cambios de su solicitud?' : '¿Confirma que desea enviar esta solicitud?') + '\n\n' + chosen + '\n' + fmt(a) + '\na ' + fmt(b))) return;
+  const ed = S.edit;
+  const ok = await ask(ed ? '¿Desea guardar los cambios de la solicitud de reserva?' : '¿Desea enviar la solicitud de reserva?',
+    [...S.spaces.filter(s => ids.includes(s.id)).map(spaceLine), ...when(a, b)],
+    ed ? 'Guardar cambios' : 'Enviar solicitud', 'Volver');
+  if (!ok) return;
   const pf = {user_id: S.user.id, email: S.user.email, full_name: $('#nm').value.trim(), phone: $('#ph').value.trim(), updated_at: new Date().toISOString()};
   let r = await sb.from('profiles').upsert(pf);
   if (r.error) return msg(err(r.error), 1);
@@ -255,7 +275,7 @@ async function decide(btn, kind) {
     swapped = !(sel.length === cur.length && sel.every(x => cur.includes(x)));
     // Revisa Google Calendar antes de aprobar: si hay eventos en ese horario, el administrador decide
     const found = await calendarConflicts(id, s, e, sel.length ? sel : cur);
-    if (found && found.length && !confirm('En Google Calendar ya hay eventos en ese horario:\n\n' + found.join('\n') + '\n\n¿Aprobar de todos modos?')) return;
+    if (found && found.length && !(await ask('En Google Calendar ya hay eventos en ese horario. ¿Desea aprobar de todos modos?', found, 'Aprobar de todos modos', 'Volver'))) return;
     if (swapped) {
       const q = await sb.rpc('change_reservation_spaces', {p_reservation: id, p_space_ids: sel});
       if (q.error) return msg(err(q.error), 1);
@@ -317,7 +337,11 @@ const acts = {
   ed: b => editSpace(b.dataset.id),
   cx: async b => {
     const id = b.dataset.id;
-    if (!confirm('¿Cancelar esta reserva? El espacio quedará libre para otras personas.')) return;
+    const m = S.mine[id];
+    const ok = await ask('¿Desea cancelar la reserva?',
+      [...m.reservation_items.map(i => spaceLine(S.spaces.find(s => s.id === i.space_id))), ...when(m.starts_at, m.ends_at), 'El espacio quedará libre para otras personas.'],
+      'Sí, cancelar reserva', 'Volver');
+    if (!ok) return;
     const q = await sb.rpc('cancel_my_reservation', {p_reservation: id});
     if (q.error) return msg(err(q.error), 1);
     const f = await sb.functions.invoke('sync-calendar', {body: {reservation_id: id}}); // quita el evento del calendario
