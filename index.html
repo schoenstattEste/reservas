@@ -25,7 +25,7 @@ button.sec{background:none;color:var(--ink);border-color:var(--line)}
 .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line);color:var(--ink);font-size:1rem}
 .row:last-child{border:0}.row .tag{margin-left:auto}
 .tag{font-size:.82rem;padding:2px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
-.available,.approved{color:var(--ok)}.booked,.blackout,.inactive,.rejected,.cancelled{color:var(--bad)}.pending{color:var(--warn)}
+.available,.approved{color:var(--ok)}.booked,.blackout,.inactive,.calendar_busy,.rejected,.cancelled{color:var(--bad)}.row.off{opacity:.6}.row.off .tag{color:var(--mut)}.pending{color:var(--warn)}
 .chip{display:inline-block;margin-right:12px}details{margin:6px 0 12px}summary{cursor:pointer;color:var(--ac)}.pick{padding:8px 0}small,.muted{color:var(--mut)}
 #msg{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:92%;padding:10px 16px;border-radius:8px;color:#fff;z-index:9}
 #msg.ok{background:var(--ok)}#msg.bad{background:var(--bad)}
@@ -41,12 +41,13 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UGXL0ookgPQXW5guuHMwbA_a6qi_ECZ';
 
 /* ============ 2. TEXTOS (se pueden cambiar sin riesgo) ============ */
 const TITLE = 'Reserva de salas y recursos';
-const LBL = {available:'Disponible', booked:'Ocupado', blackout:'No disponible (bloqueo)', inactive:'Deshabilitado',
+const LBL = {available:'Disponible', booked:'No disponible', blackout:'No disponible', calendar_busy:'No disponible', inactive:'Deshabilitado',
   pending:'Pendiente', approved:'Aprobada', rejected:'Rechazada', cancelled:'Cancelada'};
 const ERR = {invalid_time:'El horario no es válido o ya pasó.', no_spaces:'Elija al menos una sala o recurso.',
   profile_incomplete:'Complete su nombre y teléfono.', too_many_pending:'Tiene demasiadas solicitudes pendientes.',
   unavailable:'Alguno de los espacios ya no está disponible en ese horario.', not_authenticated:'Inicie sesión.',
-  exclusion:'Ese horario choca con otra reserva aprobada.'};
+  exclusion:'Ese horario choca con otra reserva aprobada.',
+  not_cancellable:'Esta reserva ya no se puede cancelar.', already_past:'Esa reserva ya pasó.', not_found:'No se encontró la reserva.'};
 
 /* ============ 3. UTILIDADES ============ */
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -132,13 +133,25 @@ function range() {
   const s = new Date(d + 'T' + a), e = new Date(d + 'T' + b);
   return e > s ? [s.toISOString(), e.toISOString()] : [];
 }
+// Devuelve {id_espacio: true} para los espacios ocupados en Google Calendar, o null si no se pudo consultar
+async function calendarBusy(a, b) {
+  try {
+    const r = await sb.functions.invoke('check-calendar', {body: {start: a, end: b}});
+    return r.error || !r.data ? null : (r.data.busy || {});
+  } catch (_) { return null; }
+}
 async function avail() {
   const [a, b] = range(), box = $('#av');
   if (!a) { box.textContent = 'Revise que la hora de fin sea posterior a la de inicio.'; return; }
   box.textContent = 'Consultando…';
   const act = S.spaces.filter(s => s.active);
-  const st = await Promise.all(act.map(s => sb.rpc('check_availability', {p_space: s.id, p_start: a, p_end: b}).then(r => r.data)));
-  box.innerHTML = act.map((s, i) => `<label class="row"><input type="checkbox" name="sp" value="${s.id}" ${st[i] !== 'available' ? 'disabled' : ''}>
+  // Disponibilidad en la base de datos + lo que ya está en Google Calendar (incluye reservas manuales)
+  const [dbSt, cal] = await Promise.all([
+    Promise.all(act.map(s => sb.rpc('check_availability', {p_space: s.id, p_start: a, p_end: b}).then(r => r.data))),
+    calendarBusy(a, b)]);
+  const st = act.map((s, i) => dbSt[i] === 'available' && cal && cal[s.id] ? 'calendar_busy' : dbSt[i]);
+  const warn = cal ? '' : '<p><small>No se pudo consultar Google Calendar: la lista podría no incluir reservas ingresadas a mano.</small></p>';
+  box.innerHTML = warn + act.map((s, i) => `<label class="row ${st[i] !== 'available' ? 'off' : ''}"><input type="checkbox" name="sp" value="${s.id}" ${st[i] !== 'available' ? 'disabled' : ''}>
   <b>${esc(s.name)}</b><small>${s.kind === 'room' ? 'Sala' : 'Recurso'}${s.capacity ? ' · ' + s.capacity + ' personas' : ''}${feats(s)}</small>
   <span class="tag ${st[i]}">${LBL[st[i]] || st[i]}</span></label>`).join('') || 'No hay salas ni recursos habilitados.';
 }
@@ -148,12 +161,15 @@ async function submit(e) {
   if (!a) return msg('Revise la fecha y las horas.', 1);
   const ids = [...document.querySelectorAll('[name=sp]:checked')].map(x => x.value);
   if (!ids.length) return msg(ERR.no_spaces, 1);
+  const cal = await calendarBusy(a, b); // revisión final por si alguien reservó mientras tanto
+  if (cal && ids.some(i => cal[i])) return msg('Alguno de los espacios ya tiene una reserva en ese horario. Vuelva a elegir.', 1);
   const pf = {user_id: S.user.id, email: S.user.email, full_name: $('#nm').value.trim(), phone: $('#ph').value.trim(), updated_at: new Date().toISOString()};
   let r = await sb.from('profiles').upsert(pf);
   if (r.error) return msg(err(r.error), 1);
   S.profile = pf;
   r = await sb.rpc('submit_reservation', {p_purpose: $('#pp').value, p_attendees: +$('#at').value || null, p_start: a, p_end: b, p_space_ids: ids});
   if (r.error) return msg(err(r.error), 1);
+  sb.functions.invoke('notify', {body: {reservation_id: r.data, event: 'new'}}).catch(() => {}); // aviso a administradores (si falla, no afecta la solicitud)
   msg('Solicitud enviada. Queda pendiente de revisión.');
   S.tab = 'mine'; shell();
 }
@@ -166,7 +182,8 @@ async function mineView() {
   $('#view').innerHTML = (data || []).map(r => `<div class="card"><span class="tag ${r.status}">${LBL[r.status]}</span>
   <h3>${esc(names(r))}</h3><div>${fmt(r.starts_at)} a ${fmt(r.ends_at)}</div>
   ${r.was_modified ? '<small>La administración ajustó el horario o los datos solicitados.</small><br>' : ''}
-  ${r.admin_note ? '<small>Nota: ' + esc(r.admin_note) + '</small>' : ''}</div>`).join('') || '<p class="muted">Aún no tiene solicitudes. Cree la primera en "Nueva solicitud".</p>';
+  ${r.admin_note ? '<small>Nota: ' + esc(r.admin_note) + '</small>' : ''}
+  ${['pending', 'approved'].includes(r.status) && new Date(r.ends_at) > new Date() ? '<div><button class="sec" data-act="cx" data-id="' + r.id + '">Cancelar reserva</button></div>' : ''}</div>`).join('') || '<p class="muted">Aún no tiene solicitudes. Cree la primera en "Nueva solicitud".</p>';
 }
 
 /* ============ 8. ADMINISTRACIÓN ============ */
@@ -227,7 +244,9 @@ async function decide(btn, kind) {
   const f = await sb.functions.invoke('sync-calendar', {body: {reservation_id: id, removed}});
   let d = '';
   try { const j = f.error ? await f.error.context.json() : f.data; d = (j.detail || [j.error]).filter(Boolean).join('; '); } catch (_) {}
-  msg(f.error ? 'Guardado, pero Google Calendar no se actualizó: ' + d : 'Listo. ' + d, !!f.error);
+  const n = await sb.functions.invoke('notify', {body: {reservation_id: id, event: 'decision'}});
+  const mail = n.error ? ' No se pudo enviar el correo a la persona.' : ' Se avisó por correo a la persona.';
+  msg((f.error ? 'Guardado, pero Google Calendar no se actualizó: ' + d : 'Listo. ' + d) + mail, !!f.error || !!n.error);
   adminView();
 }
 
@@ -267,6 +286,16 @@ const acts = {
   ok: b => decide(b, 'ok'),
   no: b => decide(b, 'no'),
   ed: b => editSpace(b.dataset.id),
+  cx: async b => {
+    const id = b.dataset.id;
+    if (!confirm('¿Cancelar esta reserva? El espacio quedará libre para otras personas.')) return;
+    const q = await sb.rpc('cancel_my_reservation', {p_reservation: id});
+    if (q.error) return msg(err(q.error), 1);
+    const f = await sb.functions.invoke('sync-calendar', {body: {reservation_id: id}}); // quita el evento del calendario
+    sb.functions.invoke('notify', {body: {reservation_id: id, event: 'cancelled'}}).catch(() => {}); // avisa a la administración
+    msg(f.error ? 'Reserva cancelada. Avise a la administración para que quite el evento del calendario.' : 'Reserva cancelada. El espacio quedó libre.', !!f.error);
+    mineView();
+  },
   bo: async () => {
     const s = $('#bs').value, a = $('#b1').value, b = $('#b2').value;
     if (!s || !a || !b) return msg('Complete el espacio y las fechas.', 1);
