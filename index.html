@@ -26,7 +26,7 @@ button.sec{background:none;color:var(--ink);border-color:var(--line)}
 .row:last-child{border:0}.row .tag{margin-left:auto}
 .tag{font-size:.82rem;padding:2px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
 .available,.approved{color:var(--ok)}.booked,.blackout,.inactive,.rejected,.cancelled{color:var(--bad)}.pending{color:var(--warn)}
-.chip{display:inline-block;margin-right:12px}small,.muted{color:var(--mut)}
+.chip{display:inline-block;margin-right:12px}details{margin:6px 0 12px}summary{cursor:pointer;color:var(--ac)}.pick{padding:8px 0}small,.muted{color:var(--mut)}
 #msg{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:92%;padding:10px 16px;border-radius:8px;color:#fff;z-index:9}
 #msg.ok{background:var(--ok)}#msg.bad{background:var(--bad)}
 </style>
@@ -62,6 +62,12 @@ function msg(t, bad) {
   clearTimeout(msg.t); msg.t = setTimeout(() => m.hidden = true, 6000);
 }
 const names = r => (r.reservation_items || []).map(i => i.spaces?.name || 'Espacio').join(', ');
+const spacePicker = r => {
+  const cur = new Set((r.reservation_items || []).map(i => i.space_id));
+  return `<details><summary>Cambiar sala o recurso</summary><div class="pick">${S.spaces.filter(s => s.active || cur.has(s.id)).map(s =>
+    `<label class="chip"><input type="checkbox" value="${s.id}" ${cur.has(s.id) ? 'checked' : ''}>${esc(s.name)}${s.capacity ? ' (' + s.capacity + ' pers.)' : ''}</label>`).join('')}</div>
+    <small class="muted">Marque lo que quedará en la reserva y pulse ${r.status === 'pending' ? 'Aprobar' : 'Guardar cambios'}. El nuevo espacio debe estar libre en ese horario.</small></details>`;
+};
 const feats = s => { const f = (s.space_features || []).map(x => x.features.name + (x.detail ? ' ' + x.detail : '')).join(', '); return f ? ' · ' + esc(f) : ''; };
 
 /* ============ 4. INICIO DE SESIÓN ============ */
@@ -168,7 +174,7 @@ async function adminView() {
   $('#view').textContent = 'Cargando…';
   const now = new Date().toISOString();
   const [rs, bl] = await Promise.all([
-    sb.from('reservations').select('*, reservation_items(spaces(name))').in('status', ['pending', 'approved']).gte('ends_at', now).order('starts_at'),
+    sb.from('reservations').select('*, reservation_items(space_id, spaces(name))').in('status', ['pending', 'approved']).gte('ends_at', now).order('starts_at'),
     sb.from('blackouts').select('*, spaces(name)').gte('ends_at', now).order('starts_at')]);
   const list = rs.data || [];
   S.res = Object.fromEntries(list.map(r => [r.id, r]));
@@ -178,6 +184,7 @@ async function adminView() {
   <div class="g"><label>Inicio<input type="datetime-local" class="s" value="${loc(r.starts_at)}"></label>
   <label>Fin<input type="datetime-local" class="e" value="${loc(r.ends_at)}"></label>
   <label>Nota para la persona<input class="n" value="${esc(r.admin_note)}"></label></div>
+  ${spacePicker(r)}
   ${r.status === 'pending' ? '<button data-act="ok">Aprobar</button> <button class="sec" data-act="no">Rechazar</button>'
     : '<button data-act="ok">Guardar cambios</button> <button class="sec" data-act="no">Cancelar reserva</button>'}</div>`;
   const pend = list.filter(r => r.status === 'pending'), appr = list.filter(r => r.status === 'approved');
@@ -199,15 +206,25 @@ async function adminView() {
 async function decide(btn, kind) {
   const card = btn.closest('.card'), id = card.dataset.id, r = S.res[id];
   const s = iso(card.querySelector('.s').value), e = iso(card.querySelector('.e').value);
+  let removed = [], swapped = false;
+  if (kind === 'ok') {
+    const sel = [...card.querySelectorAll('details input:checked')].map(x => x.value);
+    const cur = r.reservation_items.map(i => i.space_id);
+    swapped = !(sel.length === cur.length && sel.every(x => cur.includes(x)));
+    if (swapped) {
+      const q = await sb.rpc('change_reservation_spaces', {p_reservation: id, p_space_ids: sel});
+      if (q.error) return msg(err(q.error), 1);
+      removed = q.data || [];
+    }
+  }
   const up = {admin_note: card.querySelector('.n').value || null, decided_by: S.user.id, decided_at: new Date().toISOString()};
   if (kind === 'ok') {
     const changed = new Date(s) - new Date(r.starts_at) || new Date(e) - new Date(r.ends_at);
-    Object.assign(up, {status: 'approved', starts_at: s, ends_at: e, was_modified: r.was_modified || !!changed});
+    Object.assign(up, {status: 'approved', starts_at: s, ends_at: e, was_modified: r.was_modified || !!changed || swapped});
   } else up.status = r.status === 'pending' ? 'rejected' : 'cancelled';
   const {error} = await sb.from('reservations').update(up).eq('id', id);
   if (error) return msg(err(error), 1);
-  const f = await sb.functions.invoke('sync-calendar', {body: {reservation_id: id}});
-  /*f.error ? msg('Guardado, pero no se pudo actualizar Google Calendar. Revise el ID del calendario y que esté compartido con la cuenta de servicio.', 1) : msg('Listo.');*/
+  const f = await sb.functions.invoke('sync-calendar', {body: {reservation_id: id, removed}});
   let d = '';
   try { const j = f.error ? await f.error.context.json() : f.data; d = (j.detail || [j.error]).filter(Boolean).join('; '); } catch (_) {}
   msg(f.error ? 'Guardado, pero Google Calendar no se actualizó: ' + d : 'Listo. ' + d, !!f.error);
