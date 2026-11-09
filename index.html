@@ -5,21 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Reserva de salas y recursos</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;1,500&display=swap">
 <style>
-:root{color-scheme:light dark;--bg:#f4f6f8;--card:#fff;--ink:#1c2630;--mut:#5d6b78;--line:#d8dee4;--ac:#1b5fa8;--ok:#1f7a4d;--bad:#b3402f;--warn:#9a6a00}
-@media(prefers-color-scheme:dark){:root{--bg:#141a20;--card:#1d252d;--ink:#e6ebf0;--mut:#9aa8b5;--line:#33404c;--ac:#6aa8e8;--ok:#5cc08a;--bad:#e8806e;--warn:#e0b04a}}
+/* Colores de la organización: azul del logo (--ac), dorado del sitio web (--gold). Cambiar aquí si hace falta. */
+:root{color-scheme:light dark;--bg:#f4f6f8;--card:#fff;--ink:#1c2630;--mut:#5d6b78;--line:#d8dee4;--ac:#010066;--acink:#fff;--gold:#f8b732;--ok:#1f7a4d;--bad:#b3402f;--warn:#9a6a00;--serif:'Playfair Display',Georgia,'Times New Roman',serif}
+@media(prefers-color-scheme:dark){:root{--bg:#141a20;--card:#1d252d;--ink:#e6ebf0;--mut:#9aa8b5;--line:#33404c;--ac:#f8b732;--acink:#010066;--ok:#5cc08a;--bad:#e8806e;--warn:#e0b04a}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
 main{max-width:860px;margin:0 auto;padding:16px}
 header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
-h1{font-size:1.3rem;margin:0}h2{font-size:1.15rem;margin:0 0 8px}h3{font-size:1rem;margin:16px 0 6px}
+h1{font-family:var(--serif);font-size:1.3rem;margin:0}h2{font-size:1.15rem;margin:0 0 8px}h3{font-size:1rem;margin:16px 0 6px}
 nav{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
-nav button{background:none;color:var(--ink);border:1px solid var(--line)}nav button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+nav button{background:none;color:var(--ink);border:1px solid var(--line)}nav button.on{background:var(--ac);color:var(--acink);border-color:var(--ac)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:12px}
 .g{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
 label{display:block;font-size:.9rem;color:var(--mut);margin-bottom:8px}
 input,select,textarea{display:block;width:100%;margin-top:2px;padding:8px;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px}
 input[type=checkbox]{display:inline-block;width:auto;margin:0 6px 0 0}
-button{font:inherit;padding:8px 14px;border-radius:6px;border:1px solid var(--ac);background:var(--ac);color:#fff;cursor:pointer}
+button{font:inherit;padding:8px 14px;border-radius:6px;border:1px solid var(--ac);background:var(--ac);color:var(--acink);cursor:pointer}
 button.sec{background:none;color:var(--ink);border-color:var(--line)}
 :focus-visible{outline:3px solid var(--ac);outline-offset:2px}
 .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line);color:var(--ink);font-size:1rem}
@@ -31,6 +34,15 @@ dialog{font:inherit;border:1px solid var(--line);border-radius:10px;padding:20px
 dialog::backdrop{background:rgba(0,0,0,.45)}dialog h3{margin:0 0 12px;font-size:1.1rem}.dl{margin-bottom:18px;line-height:1.6}.da{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 #msg{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:92%;padding:10px 16px;border-radius:8px;color:#fff;z-index:9}
 #msg.ok{background:var(--ok)}#msg.bad{background:var(--bad)}
+/* Pantalla de entrada */
+.login{max-width:440px;margin:20px auto;padding:22px;border-top:5px solid var(--gold)}
+.brand{text-align:center;margin-bottom:8px}.brand img{display:block;width:96px;height:96px;object-fit:contain;margin:0 auto 10px}
+.brand h1{font-size:1.6rem;line-height:1.25}.brand p{margin:8px 0 0}
+.login h3{margin:18px 0 8px}.login .wide{width:100%}
+.or{display:flex;align-items:center;gap:10px;color:var(--mut);margin:20px 0 4px}.or:before,.or:after{content:"";flex:1;border-top:1px solid var(--line)}
+.help{text-align:center;margin:20px 0 0;font-size:.9rem}.help a{color:var(--ac)}
+.logo-sm{width:32px;height:32px;object-fit:contain;vertical-align:middle;margin-right:8px}
+@media(prefers-color-scheme:dark){.brand img,.logo-sm{background:#fff;border-radius:12px;padding:4px}}
 </style>
 </head>
 <body>
@@ -43,6 +55,12 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UGXL0ookgPQXW5guuHMwbA_a6qi_ECZ';
 
 /* ============ 2. TEXTOS (se pueden cambiar sin riesgo) ============ */
 const TITLE = 'Reserva de salas y recursos';
+const LOGO_URL = 'logo.png'; // archivo subido junto a index.html, o una dirección completa (https://...). Vacío = sin logo
+const DESCRIPTION = 'Solicite aquí las salas y recursos de la Casa Sede Este. Su solicitud será revisada por la administración.'; // vacío = no se muestra
+const SENDER_NAME = 'Reservas Casa Sede Este'; // nombre con que llegan los correos (el mismo del remitente en Supabase)
+const HELP_EMAIL = 'reservascasasedeeste@gmail.com'; // vacío = no se muestra la línea de ayuda
+document.title = TITLE;
+if (LOGO_URL) { const ic = document.createElement('link'); ic.rel = 'icon'; ic.href = LOGO_URL; document.head.appendChild(ic); }
 const LBL = {available:'Disponible', booked:'No disponible', blackout:'No disponible', calendar_busy:'No disponible', inactive:'Deshabilitado', expired:'Sin respuesta',
   pending:'Pendiente', approved:'Aprobada', rejected:'Rechazada', cancelled:'Cancelada'};
 const ERR = {invalid_time:'El horario no es válido o ya pasó.', no_spaces:'Elija al menos una sala o recurso.',
@@ -96,16 +114,50 @@ sb.auth.onAuthStateChange((_e, s) => {
   if (!S.started || (s?.user?.id || null) !== (S.user?.id || null)) { S.started = 1; start(s); }
 });
 
+const imgTag = cls => LOGO_URL ? `<img class="${cls}" src="${esc(LOGO_URL)}" alt="" onerror="this.remove()">` : ''; // si el logo no carga, se oculta
+const logoSm = () => imgTag('logo-sm');
+const brand = () => `<div class="brand">${imgTag('')}<h1>${esc(TITLE)}</h1>${DESCRIPTION ? `<p class="muted">${esc(DESCRIPTION)}</p>` : ''}</div>`;
+const helpLine = () => HELP_EMAIL ? `<p class="help muted">¿Necesita ayuda? Escriba a <a href="mailto:${esc(HELP_EMAIL)}">${esc(HELP_EMAIL)}</a></p>` : '';
+
 function loginView() {
-  $('#app').innerHTML = `<div class="card"><h1>${TITLE}</h1><p class="muted">Inicie sesión para solicitar una reserva.</p>
-  <button data-act="google">Continuar con Google</button>
-  <h3>Otro proveedor de correo</h3>
-  <form id="lf"><label>Correo electrónico<input type="email" id="em" required></label><button>Enviar enlace de acceso</button></form></div>`;
+  $('#app').innerHTML = `<div class="login card">${brand()}
+  <h3>¿Tiene una cuenta de Google (Gmail)?</h3>
+  <button class="wide" data-act="google">Entrar con mi cuenta de Google</button>
+  <div class="or"><span>o</span></div>
+  <form id="lf"><h3>¿Usa otro correo (Outlook, Yahoo, institucional…)? Escríbalo aquí</h3>
+  <label>Correo electrónico<input type="email" id="em" required autocomplete="email"></label>
+  <button class="wide">Enviarme el enlace de acceso</button>
+  <p class="muted"><small>Le llegará un correo de ${esc(SENDER_NAME)}. Ábralo y pulse el botón para entrar. No necesita contraseña.</small></p></form>
+  ${helpLine()}</div>`;
   $('#lf').onsubmit = async e => {
     e.preventDefault();
-    const r = await sb.auth.signInWithOtp({email: $('#em').value.trim(), options: {emailRedirectTo: location.href.split('#')[0]}});
-    r.error ? msg(err(r.error), 1) : msg('Revise su correo y abra el enlace para entrar.');
+    const b = e.submitter; if (b) b.disabled = true;
+    if (!(await sendLink($('#em').value.trim())) && b) b.disabled = false;
   };
+}
+
+// Envía el enlace de acceso. Si todo sale bien, muestra la pantalla de confirmación. Devuelve false si falló.
+async function sendLink(email) {
+  const r = await sb.auth.signInWithOtp({email, options: {emailRedirectTo: location.href.split('#')[0]}});
+  if (r.error) { msg(err(r.error), 1); return false; }
+  sentView(email);
+  return true;
+}
+
+function sentView(email) {
+  $('#app').innerHTML = `<div class="login card">${brand()}
+  <h3>Revise su correo</h3>
+  <p>Enviamos un enlace de acceso a <b>${esc(email)}</b>. Ábralo y pulse el botón para entrar.</p>
+  <p class="muted"><small>Si no lo ve en unos minutos, revise la carpeta de spam o de correo no deseado.</small></p>
+  <p><button class="sec" id="rs" disabled>Reenviar enlace (60 s)</button> <button class="sec" data-act="again">Usar otro correo</button></p>
+  ${helpLine()}</div>`;
+  const b = $('#rs'); let n = 60;
+  const t = setInterval(() => {
+    if (!document.body.contains(b)) return clearInterval(t);
+    if (--n > 0) b.textContent = 'Reenviar enlace (' + n + ' s)';
+    else { clearInterval(t); b.textContent = 'Reenviar enlace'; b.disabled = false; }
+  }, 1000);
+  b.onclick = async () => { b.disabled = true; if (!(await sendLink(email))) b.disabled = false; };
 }
 
 async function loadBase() {
@@ -128,7 +180,7 @@ async function start(session) {
 function shell() {
   const tabs = [['new','Nueva solicitud'], ['mine','Mis reservas']];
   if (S.admin) tabs.push(['admin','Administración']);
-  $('#app').innerHTML = `<header><h1>${TITLE}</h1><span class="muted">${esc(S.user.email)} <button class="sec" data-act="out">Salir</button></span></header>
+  $('#app').innerHTML = `<header><h1>${logoSm()}${esc(TITLE)}</h1><span class="muted">${esc(S.user.email)} <button class="sec" data-act="out">Salir</button></span></header>
   <nav>${tabs.map(t => `<button data-act="tab" data-t="${t[0]}" class="${S.tab === t[0] ? 'on' : ''}">${t[1]}</button>`).join('')}</nav><section id="view"></section>`;
   ({new:newView, mine:mineView, admin:adminView})[S.tab]();
 }
@@ -348,6 +400,7 @@ async function saveSpace(e) {
 const acts = {
   google: () => sb.auth.signInWithOAuth({provider: 'google', options: {redirectTo: location.origin + location.pathname}}),
   out: () => sb.auth.signOut(),
+  again: () => loginView(),
   tab: b => { S.tab = b.dataset.t; S.edit = null; shell(); },
   em: b => { S.edit = S.mine[b.dataset.id]; S.editInit = 0; S.tab = 'new'; shell(); },
   ok: b => decide(b, 'ok'),
