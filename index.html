@@ -35,7 +35,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}dialog h3{margin:0 0 12px;font-size:
 #msg{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:92%;padding:10px 16px;border-radius:8px;color:#fff;z-index:9}
 #msg.ok{background:var(--ok)}#msg.bad{background:var(--bad)}
 /* Lista de salas y recursos en la solicitud: tarjetas agrupadas */
-.note{background:var(--bg);border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:8px;padding:10px 12px;margin:0 0 6px;font-size:.92rem}
+.hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.hd #navlink{font-weight:400;font-size:.88rem}
 .sec-h{display:flex;align-items:baseline;gap:8px;margin:20px 0 8px}.sec-h h4{margin:0;font-size:1.02rem;color:var(--ac)}
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
 .tile{position:relative;display:flex;flex-direction:column;gap:4px;margin:0;padding:12px;min-height:92px;background:var(--card);border:1.5px solid var(--line);border-radius:10px;color:var(--ink);font-size:1rem}
@@ -53,8 +53,8 @@ dialog::backdrop{background:rgba(0,0,0,.45)}dialog h3{margin:0 0 12px;font-size:
 .bdg{display:inline-flex;white-space:nowrap;align-items:center;font-size:.78rem;font-weight:600;padding:2px 8px;border-radius:99px;border:1px solid currentColor;width:fit-content}
 .bdg.fast{color:var(--ok)}.bdg.appr{color:var(--warn)}.bdg.grey{color:var(--mut)}
 .inc-tag{display:none}.tile.inc .inc-tag{display:inline-flex}.tile.inc .bdg:not(.inc-tag){display:none}
-.cw{color:var(--warn)}.tile a.mail{position:relative;z-index:3;color:var(--ac);word-break:break-all}
-button.lnk{background:none;border:0;color:var(--ac);text-decoration:underline;padding:10px 0;font-weight:600}
+.cw{color:var(--warn);font-size:.74rem;line-height:1.25}.cwm{color:var(--warn)}.tile a.mail{position:relative;z-index:3;color:var(--ac);word-break:break-all}
+button.lnk{background:none;border:0;color:var(--ac);text-decoration:underline;padding:0;font:inherit;font-size:.88rem}
 .sumbar[hidden]{display:none}.sumbar{position:sticky;bottom:0;z-index:2;display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px -14px -14px;padding:12px 14px;background:var(--card);border-top:1px solid var(--line);box-shadow:0 -6px 16px rgba(0,0,0,.08);border-radius:0 0 8px 8px}
 .sum{flex:1;min-width:200px;display:flex;flex-direction:column}.sum b{font-size:1.02rem}.sum .ok{color:var(--ok)}.sum .wait{color:var(--warn)}
 /* Pantalla de entrada */
@@ -75,7 +75,7 @@ button.lnk{background:none;border:0;color:var(--ac);text-decoration:underline;pa
 /* ============ 1. CONFIGURACIÓN (lo único que debe editar para empezar) ============ */
 const SUPABASE_URL = 'https://zwypvyhxyvpkmlkwimyx.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_UGXL0ookgPQXW5guuHMwbA_a6qi_ECZ';
-  
+
 /* ============ 2. TEXTOS (se pueden cambiar sin riesgo) ============ */
 const TITLE = 'Reserva de salas y recursos';
 const LOGO_URL = 'logo.png'; // archivo subido junto a index.html, o una dirección completa (https://...). Vacío = sin logo
@@ -236,7 +236,7 @@ function newView() {
   <div class="g"><label>Fecha<input type="date" id="dt" required min="${loc(new Date()).slice(0, 10)}" max="${loc(new Date(Date.now() + MAXDAYS * 864e5)).slice(0, 10)}" value="${sd.slice(0, 10)}"></label><label>Hora de inicio<input type="time" id="t1" required value="${sd.slice(11, 16)}"></label>
   <label>Hora de fin<input type="time" id="t2" required value="${ee.slice(11, 16)}"></label><label>Asistentes<input type="number" id="at" min="1" value="${ed?.attendees ?? ''}"></label></div>
   <label>Motivo de la reunión<textarea id="pp" rows="2">${esc(ed?.purpose)}</textarea></label>
-  <h3>Salas y recursos</h3><div id="av" class="muted">Elija fecha y horario para ver qué está disponible.</div><br>
+  <h3 class="hd">Salas y recursos <span id="navlink"></span></h3><div id="av" class="muted">Elija fecha y horario para ver qué está disponible.</div><br>
   <div class="sumbar" id="sumbar" hidden><div class="sum"><small>Seleccionado</small><b id="sumtxt">Aún no ha elegido ninguna</b><span id="summsg" class="muted">Elija una o más salas o recursos.</span></div>
   <div><button id="go">${ed ? 'Guardar cambios' : 'Continuar'}</button>${ed ? ' <button type="button" class="sec" data-act="tab" data-t="mine">Volver sin guardar</button>' : ''}</div></div></form>`;
   S.showNA = false; S.av = null;
@@ -270,7 +270,7 @@ async function calendarConflicts(rid, a, b, ids) {
 }
 async function avail() {
   const [a, b] = range(), box = $('#av'), ed = S.edit;
-  if (!a) { S.av = null; box.textContent = 'Revise que la hora de fin sea posterior a la de inicio.'; updateSummary(); return; }
+  if (!a) { S.av = null; box.textContent = 'Revise que la hora de fin sea posterior a la de inicio.'; $('#navlink').innerHTML = ''; updateSummary(); return; }
   const editAppr = ed?.status === 'approved', locked = editAppr && ed.space_locked;
   let initKeep = null;
   if (ed && !S.editInit) { S.editInit = 1; initKeep = new Set((ed.reservation_items || []).map(i => i.space_id)); }
@@ -332,21 +332,24 @@ function renderAvail() {
     // Edificio completo: todas las salas activas del edificio (no incluye recursos). Solo al crear una solicitud nueva.
     if (g.bd && g.bd.allow_whole && !ed && g.items.length) {
       const busy = [...g.items.filter(([, i]) => st[i] !== 'available').map(([s]) => s.name), ...(cal && cal[g.bd.id] ? ['calendario ' + g.bd.name] : [])], free = !busy.length;
-      feat = `<label class="tile wide ${free ? '' : 'na'}"><input type="checkbox" name="bld" value="${g.bd.id}" ${free ? (keepB.has(g.bd.id) ? 'checked' : '') : 'disabled'}>${CHK}
+      feat = free
+        ? `<label class="tile wide"><input type="checkbox" name="bld" value="${g.bd.id}" ${keepB.has(g.bd.id) ? 'checked' : ''}>${CHK}
   <b>${esc(g.bd.name)} completa</b><small class="muted">Todas las salas del edificio, para actividades grandes (no incluye recursos)</small>
-  ${free ? '' : `<small class="cw">Ya existen reservas activas en este edificio en ese horario (Ocupadas: ${esc(busy.join(', '))}), por lo que no se puede seleccionar. Para solicitar la casa completa, escriba a ${HELP_EMAIL ? '<a class="mail" href="mailto:' + esc(HELP_EMAIL) + '">' + esc(HELP_EMAIL) + '</a>' : 'la administración'} o contacte al administrador de reservas.</small>`}
-  <span>${free ? '<span class="bdg appr">Con aprobación</span>' : '<span class="bdg grey">No disponible</span>'}</span></label>`;
+  <span><span class="bdg appr">Con aprobación</span></span></label>`
+        : `<label class="tile wide na"><input type="checkbox" name="bld" value="${g.bd.id}" disabled>
+  <b>${esc(g.bd.name)} completa</b>
+  <small class="cwm">En este horario no está disponible toda la casa. Escriba a ${HELP_EMAIL ? '<a class="mail" href="mailto:' + esc(HELP_EMAIL) + '">' + esc(HELP_EMAIL) + '</a>' : 'la administración'} o contacte al administrador de reservas para revisar su caso.</small></label>`;
     }
     const tiles = g.items.map(([s, i]) => tile(s, i)).join('');
     if (!feat && !tiles) continue;
     html += `<div class="sec-h"><h4>${esc(g.title)}</h4><small class="muted">${esc(g.sub)}</small></div><div class="tiles">${feat}${tiles}</div>`;
   }
   const none = !html ? '<p class="muted">No hay salas ni recursos disponibles en ese horario.</p>' : '';
-  const link = hiddenN || S.showNA ? `<button type="button" class="lnk sec" data-act="na">${S.showNA ? 'Ocultar las no disponibles' : 'Mostrar también las no disponibles (' + hiddenN + ')'}</button>` : '';
+  const nl = $('#navlink');
+  if (nl) nl.innerHTML = hiddenN || S.showNA ? `(<button type="button" class="lnk sec" data-act="na">${S.showNA ? 'ocultar reservados' : 'mostrar reservados (' + hiddenN + ')'}</button>)` : '';
   const warn = cal ? '' : '<p><small>No se pudo consultar Google Calendar: la lista podría no incluir reservas ingresadas a mano.</small></p>';
   const note = locked ? '<p><small>La administración asignó la sala de esta reserva: puede cambiar la fecha y la hora, pero no la sala.</small></p>' : '';
-  box.innerHTML = `<div class="note">Solo se muestran las salas y recursos <b>disponibles</b> el ${esc(dia(a))}, de ${esc(hora(a))} a ${esc(hora(b))}. Si cambia la fecha o la hora, la lista se actualiza.</div>`
-    + warn + note + html + none + link;
+  box.innerHTML = warn + note + html + none;
   box.onchange = updateSummary;
   document.querySelectorAll('[name=bld]').forEach(x => x.onchange = () => syncBld(x));
   syncBld();
