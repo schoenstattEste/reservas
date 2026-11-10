@@ -101,6 +101,7 @@ const ERR = {invalid_time:'El horario no es válido o ya pasó.', no_spaces:'Eli
   building_not_allowed:'Ese edificio no se puede reservar completo.', no_rooms:'El edificio no tiene salas habilitadas.',
   'violates foreign key':'No se puede eliminar: tiene salas o reservas asociadas.'};
 const MAXDAYS = 90; // anticipación máxima de una reserva
+const EVMIN = 15, EVMAX = 50; // largo permitido del nombre del evento
 
 /* ============ 3. UTILIDADES ============ */
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -235,11 +236,19 @@ function newView() {
   <label>Teléfono<input id="ph" required value="${esc(p.phone)}"></label></div>
   <div class="g"><label>Fecha<input type="date" id="dt" required min="${loc(new Date()).slice(0, 10)}" max="${loc(new Date(Date.now() + MAXDAYS * 864e5)).slice(0, 10)}" value="${sd.slice(0, 10)}"></label><label>Hora de inicio<input type="time" id="t1" required value="${sd.slice(11, 16)}"></label>
   <label>Hora de fin<input type="time" id="t2" required value="${ee.slice(11, 16)}"></label><label>Asistentes<input type="number" id="at" min="1" value="${ed?.attendees ?? ''}"></label></div>
-  <label>Motivo de la reunión<textarea id="pp" rows="2">${esc(ed?.purpose)}</textarea></label>
+  <label>Nombre del evento<input id="pp" required maxlength="${EVMAX}" placeholder="ej. Reunión grupo G-66" autocomplete="off" value="${esc(ed?.purpose)}">
+  <small id="pcnt" class="muted" style="display:block;text-align:right;font-size:.7rem;margin-top:2px"></small></label>
   <h3 class="hd">Salas y recursos <span id="navlink"></span></h3><div id="av" class="muted">Elija fecha y horario para ver qué está disponible.</div><br>
   <div class="sumbar" id="sumbar" hidden><div class="sum"><small>Seleccionado</small><b id="sumtxt">Aún no ha elegido ninguna</b><span id="summsg" class="muted">Elija una o más salas o recursos.</span></div>
   <div><button id="go">${ed ? 'Guardar cambios' : 'Continuar'}</button>${ed ? ' <button type="button" class="sec" data-act="tab" data-t="mine">Volver sin guardar</button>' : ''}</div></div></form>`;
   S.showNA = false; S.av = null;
+  // Nombre del evento: de EVMIN a EVMAX caracteres (sin contar espacios sobrantes), con contador
+  const pp = $('#pp'), nameCheck = () => {
+    const n = pp.value.trim().length;
+    $('#pcnt').textContent = pp.value.length + ' / ' + EVMAX + ' caracteres';
+    pp.setCustomValidity(n < EVMIN ? 'Escriba al menos ' + EVMIN + ' caracteres para el nombre del evento (lleva ' + n + ').' : n > EVMAX ? 'El nombre del evento admite máximo ' + EVMAX + ' caracteres.' : '');
+  };
+  pp.oninput = nameCheck; nameCheck();
   $('#at').oninput = () => S.av && renderAvail(); // la capacidad se compara con los asistentes
   ['dt','t1','t2'].forEach(i => $('#' + i).onchange = avail);
   $('#f').onsubmit = submit;
@@ -306,13 +315,11 @@ function renderAvail() {
     const off = unavailable || blockedByRule || locked;
     if (off && !locked && !S.showNA) { hiddenN++; return ''; }
     const checked = !blockedByRule && !unavailable && keep.has(s.id) || locked;
-    const bName = s.building_id ? esc(S.buildings.find(x => x.id === s.building_id)?.name || 'El edificio') : '';
-    const why = unavailable && cal && s.building_id && cal[s.building_id] && st[i] === 'calendar_busy' ? bName + ' ocupada en el calendario' : '';
     const meta = [s.capacity ? s.capacity + ' personas' : '', esc(featText(s))].filter(Boolean).join(' · ');
     const badge = unavailable ? '<span class="bdg grey">No disponible</span>' : blockedByRule ? '<span class="bdg grey">Requiere solicitud nueva</span>'
       : needs ? '<span class="bdg appr">Con aprobación</span>' : '<span class="bdg fast">Inmediata</span>';
     return `<label class="tile ${off && !locked ? 'na' : ''}"><input type="checkbox" name="sp" value="${s.id}" data-b="${s.kind === 'room' ? (s.building_id || '') : ''}" data-off="${off ? 1 : 0}" ${off ? 'disabled' : ''} ${checked ? 'checked' : ''}>${CHK}
-  <b>${esc(s.name)}</b>${meta ? '<small class="muted">' + meta + '</small>' : ''}${why ? '<small class="muted">' + why + '</small>' : ''}
+  <b>${esc(s.name)}</b>${meta ? '<small class="muted">' + meta + '</small>' : ''}
   <span>${badge}<span class="bdg grey inc-tag">Incluida en la casa completa</span></span>
   ${att && s.kind === 'room' && s.capacity && s.capacity < att && !off ? '<small class="cw">Capacidad menor a su grupo (' + att + ')</small>' : ''}</label>`;
   };
@@ -388,6 +395,8 @@ async function submit(e) {
   e.preventDefault();
   const [a, b] = range();
   if (!a) return msg('Revise la fecha y las horas.', 1);
+  const evn = $('#pp').value.trim().length;
+  if (evn < EVMIN || evn > EVMAX) return msg('El nombre del evento debe tener entre ' + EVMIN + ' y ' + EVMAX + ' caracteres.', 1);
   if (new Date(a) > Date.now() + MAXDAYS * 864e5) return msg(ERR.too_far, 1);
   const ids = [...document.querySelectorAll('[name=sp]:checked')].map(x => x.value);
   const bld = S.buildings.find(x => x.id === document.querySelector('[name=bld]:checked')?.value) || null;
@@ -408,7 +417,7 @@ async function submit(e) {
   let r = await sb.from('profiles').upsert(pf);
   if (r.error) return msg(err(r.error), 1);
   S.profile = pf;
-  const f = {p_purpose: $('#pp').value, p_attendees: +$('#at').value || null, p_start: a, p_end: b, p_space_ids: ids};
+  const f = {p_purpose: $('#pp').value.trim(), p_attendees: +$('#at').value || null, p_start: a, p_end: b, p_space_ids: ids};
   let text;
   if (editAppr) {
     // Reserva aprobada: se revalida en base de datos y Calendar; si no se puede, se conserva la original
