@@ -278,7 +278,7 @@ async function avail() {
     const checked = !blockedByRule && st[i] === 'available' && keep.has(s.id) || (locked && true);
     const tagKey = blockedByRule && st[i] === 'available' ? 'needs' : st[i];
     return `<label class="row ${off && !locked ? 'off' : ''}"><input type="checkbox" name="sp" value="${s.id}" data-b="${s.kind === 'room' ? (s.building_id || '') : ''}" data-off="${off ? 1 : 0}" ${off ? 'disabled' : ''} ${checked ? 'checked' : ''}>
-  <b>${esc(s.name)}</b><small>${s.kind === 'room' ? 'Sala' : 'Recurso'}${s.capacity ? ' · ' + s.capacity + ' personas' : ''}${feats(s)} · ${needs ? 'Requiere aprobación' : 'Se aprueba automáticamente'}</small>
+  <b>${esc(s.name)}</b><small>${s.kind === 'room' ? 'Sala' : 'Recurso'}${s.capacity ? ' · ' + s.capacity + ' personas' : ''}${feats(s)} · ${needs ? 'Requiere aprobación' : 'Se aprueba automáticamente'}${cal && s.building_id && cal[s.building_id] && st[i] === 'calendar_busy' ? ' · ' + esc(S.buildings.find(b => b.id === s.building_id)?.name || 'El edificio') + ' ocupada en el calendario' : ''}</small>
   <span class="tag ${tagKey === 'needs' ? 'inactive' : st[i]}">${tagKey === 'needs' ? 'Requiere solicitud nueva' : (LBL[st[i]] || st[i])}</span></label>`;
   }).join('') || 'No hay salas ni recursos habilitados.';
   document.querySelectorAll('[name=bld]').forEach(x => x.onchange = () => syncBld(x));
