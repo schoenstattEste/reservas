@@ -52,7 +52,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}dialog h3{margin:0 0 12px;font-size:
 /* ============ 1. CONFIGURACIÓN (lo único que debe editar para empezar) ============ */
 const SUPABASE_URL = 'https://zwypvyhxyvpkmlkwimyx.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_UGXL0ookgPQXW5guuHMwbA_a6qi_ECZ';
-  
+
 /* ============ 2. TEXTOS (se pueden cambiar sin riesgo) ============ */
 const TITLE = 'Reserva de salas y recursos';
 const LOGO_URL = 'logo.png'; // archivo subido junto a index.html, o una dirección completa (https://...). Vacío = sin logo
@@ -426,7 +426,7 @@ async function adminView() {
   <div class="card"><h2>Salas y recursos</h2>
   ${S.spaces.map(s => `<div class="row"><b>${esc(s.name)}</b><small>${s.kind === 'room' ? 'Sala' : 'Recurso'}${s.building_id ? ' · ' + esc(S.buildings.find(b => b.id === s.building_id)?.name || '') : ''}${feats(s)} · ${s.requires_approval === false ? 'Aprobación automática' : 'Requiere aprobación'}</small>
   <span class="tag ${s.active ? 'available' : 'inactive'}">${s.active ? 'Habilitado' : 'Deshabilitado'}</span>
-  <button class="sec" data-act="ed" data-id="${s.id}">Editar</button></div>`).join('')}
+  <button class="sec" data-act="ed" data-id="${s.id}">Editar</button> <button class="sec" data-act="sx" data-id="${s.id}">Eliminar</button></div>`).join('')}
   <br><button data-act="ed" data-id="new">Agregar sala o recurso</button><div id="ef"></div></div>
   <div class="card"><h2>Bloqueos por periodo</h2>
   <div class="g"><label>Espacio<select id="bs">${S.spaces.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label>
@@ -526,6 +526,14 @@ const acts = {
   tab: b => { S.tab = b.dataset.t; S.edit = null; shell(); },
   em: b => { S.edit = S.mine[b.dataset.id]; S.editInit = 0; S.tab = 'new'; shell(); },
   eb: b => editBuilding(b.dataset.id),
+  sx: async b => {
+    const x = S.spaces.find(y => y.id === b.dataset.id);
+    if (!await ask('¿Desea eliminar este espacio?', [spaceLine(x), 'Se eliminan también sus bloqueos por periodo y sus características.', 'Esta acción no se puede deshacer.'], 'Eliminar', 'Volver')) return;
+    const r = await sb.from('spaces').delete().eq('id', b.dataset.id);
+    if (r.error) return msg(/foreign key/.test(r.error.message || '')
+      ? 'No se puede eliminar: tiene reservas en el historial. Deshabilítelo en "Editar" (quita "Habilitado para reservas") y dejará de ofrecerse.' : err(r.error), 1);
+    await loadBase(); msg('Espacio eliminado.'); adminView();
+  },
   bx: async b => {
     const x = S.buildings.find(y => y.id === b.dataset.id);
     if (!await ask('¿Desea eliminar el edificio?', [x?.name || ''], 'Eliminar', 'Volver')) return;
