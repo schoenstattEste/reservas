@@ -239,7 +239,7 @@ async function calendarConflicts(rid, a, b, ids) {
     if (r.error || !r.data?.conflicts) return null;
     const hm = x => /T/.test(x) ? new Date(x).toLocaleTimeString('es', {hour: '2-digit', minute: '2-digit'}) : 'todo el día';
     return Object.entries(r.data.conflicts).flatMap(([sid, list]) =>
-      list.map(x => '• ' + (S.spaces.find(s => s.id === sid)?.name || 'Espacio') + ': ' + x.summary + ' (' + hm(x.start) + ' a ' + hm(x.end) + ')'));
+      list.map(x => '• ' + (S.spaces.find(s => s.id === sid)?.name || S.buildings.find(b => b.id === sid)?.name || 'Espacio') + ': ' + x.summary + ' (' + hm(x.start) + ' a ' + hm(x.end) + ')'));
   } catch (_) { return null; }
 }
 async function avail() {
@@ -266,7 +266,7 @@ async function avail() {
   const bRows = ed ? '' : S.buildings.filter(b => b.allow_whole).map(b => {
     const rooms = act.map((s, i) => [s, i]).filter(([s]) => s.kind === 'room' && s.building_id === b.id);
     if (!rooms.length) return '';
-    const busy = rooms.filter(([, i]) => st[i] !== 'available').map(([s]) => s.name), free = !busy.length;
+    const busy = [...rooms.filter(([, i]) => st[i] !== 'available').map(([s]) => s.name), ...(cal && cal[b.id] ? ['calendario ' + b.name] : [])], free = !busy.length;
     return `<label class="row ${free ? '' : 'off'}"><input type="checkbox" name="bld" value="${b.id}" ${free ? (keepB.has(b.id) ? 'checked' : '') : 'disabled'}>
   <b>${esc(b.name)} completa</b><small>Todas las salas del edificio (no incluye recursos) · Requiere aprobación${free ? '' : ' · Ocupadas: ' + esc(busy.join(', '))}</small>
   <span class="tag ${free ? 'available' : 'booked'}">${free ? 'Disponible' : 'No disponible'}</span></label>`;
@@ -306,7 +306,7 @@ async function submit(e) {
   const ed = S.edit, editAppr = ed?.status === 'approved';
   const rooms = bld ? S.spaces.filter(s => s.active && s.kind === 'room' && s.building_id === bld.id) : [];
   const cal = await calendarBusy(a, b, ed?.id); // revisión final por si alguien reservó mientras tanto
-  if (cal && [...ids, ...rooms.map(s => s.id)].some(i => cal[i])) return msg('Alguno de los espacios ya tiene una reserva en ese horario. Vuelva a elegir.', 1);
+  if (cal && [...ids, ...rooms.map(s => s.id), ...(bld ? [bld.id] : [])].some(i => cal[i])) return msg('Alguno de los espacios ya tiene una reserva en ese horario. Vuelva a elegir.', 1);
   const chosen = S.spaces.filter(s => ids.includes(s.id));
   const auto = !bld && chosen.every(s => s.requires_approval === false);
   let q, okTxt, extra = [];
