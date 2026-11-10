@@ -67,7 +67,15 @@ const ERR = {invalid_time:'El horario no es válido o ya pasó.', no_spaces:'Eli
   profile_incomplete:'Complete su nombre y teléfono.', too_many_pending:'Tiene demasiadas solicitudes pendientes.',
   unavailable:'Alguno de los espacios ya no está disponible en ese horario.', not_authenticated:'Inicie sesión.',
   exclusion:'Ese horario choca con otra reserva aprobada.',
-  not_cancellable:'Esta reserva ya no se puede cancelar.', not_editable:'Solo se pueden editar solicitudes pendientes.', already_past:'Esa reserva ya pasó.', not_found:'No se encontró la reserva.'};
+  not_cancellable:'Esta reserva ya no se puede cancelar.', not_editable:'Esta reserva ya no se puede editar.', already_past:'Esa reserva ya pasó.', not_found:'No se encontró la reserva.',
+  too_far:'Solo se puede reservar con un máximo de 90 días de anticipación.',
+  edit_too_late:'Faltan menos de 24 horas para la reserva: solo se puede cancelar.',
+  space_locked:'La administración asignó la sala de esta reserva: puede cambiar la fecha y la hora, pero no la sala.',
+  edit_needs_admin:'Para cambiar esta reserva, comuníquese con la administración o cancélela.',
+  new_space_needs_approval:'Ese espacio requiere aprobación: haga una solicitud nueva.',
+  calendar_conflict:'Alguno de los espacios ya tiene una reserva en ese horario. Se conservó la reserva original.',
+  calendar_check_failed:'No se pudo verificar el calendario. Intente de nuevo; se conservó la reserva original.'};
+const MAXDAYS = 90; // anticipación máxima de una reserva
 
 /* ============ 3. UTILIDADES ============ */
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -188,14 +196,14 @@ function shell() {
 /* ============ 6. NUEVA SOLICITUD ============ */
 function newView() {
   const p = S.profile || {}, ed = S.edit, sd = ed ? loc(ed.starts_at) : '', ee = ed ? loc(ed.ends_at) : '';
-  $('#view').innerHTML = `<form id="f" class="card"><h2>${ed ? 'Editar solicitud' : 'Nueva solicitud'}</h2>
+  $('#view').innerHTML = `<form id="f" class="card"><h2>${ed ? (ed.status === 'approved' ? 'Editar reserva' : 'Editar solicitud') : 'Nueva solicitud'}</h2>
   <div class="g"><label>Nombre completo<input id="nm" required value="${esc(p.full_name)}"></label>
   <label>Teléfono<input id="ph" required value="${esc(p.phone)}"></label></div>
-  <div class="g"><label>Fecha<input type="date" id="dt" required value="${sd.slice(0, 10)}"></label><label>Hora de inicio<input type="time" id="t1" required value="${sd.slice(11, 16)}"></label>
+  <div class="g"><label>Fecha<input type="date" id="dt" required min="${loc(new Date()).slice(0, 10)}" max="${loc(new Date(Date.now() + MAXDAYS * 864e5)).slice(0, 10)}" value="${sd.slice(0, 10)}"></label><label>Hora de inicio<input type="time" id="t1" required value="${sd.slice(11, 16)}"></label>
   <label>Hora de fin<input type="time" id="t2" required value="${ee.slice(11, 16)}"></label><label>Asistentes<input type="number" id="at" min="1" value="${ed?.attendees ?? ''}"></label></div>
   <label>Motivo de la reunión<textarea id="pp" rows="2">${esc(ed?.purpose)}</textarea></label>
   <h3>Salas y recursos</h3><div id="av" class="muted">Elija fecha y horario para ver qué está disponible.</div><br>
-  <button>${ed ? 'Guardar cambios' : 'Enviar solicitud'}</button>${ed ? ' <button type="button" class="sec" data-act="tab" data-t="mine">Volver sin guardar</button>' : ''}</form>`;
+  <button>${ed ? 'Guardar cambios' : 'Continuar'}</button>${ed ? ' <button type="button" class="sec" data-act="tab" data-t="mine">Volver sin guardar</button>' : ''}</form>`;
   ['dt','t1','t2'].forEach(i => $('#' + i).onchange = avail);
   $('#f').onsubmit = submit;
   if (ed) avail();
@@ -207,9 +215,9 @@ function range() {
   return e > s ? [s.toISOString(), e.toISOString()] : [];
 }
 // Devuelve {id_espacio: true} para los espacios ocupados en Google Calendar, o null si no se pudo consultar
-async function calendarBusy(a, b) {
+async function calendarBusy(a, b, rid) {
   try {
-    const r = await sb.functions.invoke('check-calendar', {body: {start: a, end: b}});
+    const r = await sb.functions.invoke('check-calendar', {body: {start: a, end: b, reservation_id: rid || undefined}});
     return r.error || !r.data ? null : (r.data.busy || {});
   } catch (_) { return null; }
 }
@@ -224,52 +232,95 @@ async function calendarConflicts(rid, a, b, ids) {
   } catch (_) { return null; }
 }
 async function avail() {
-  const [a, b] = range(), box = $('#av');
+  const [a, b] = range(), box = $('#av'), ed = S.edit;
   if (!a) { box.textContent = 'Revise que la hora de fin sea posterior a la de inicio.'; return; }
-  // Conserva lo que ya estaba marcado (y, al editar, los espacios de la solicitud)
+  const editAppr = ed?.status === 'approved', locked = editAppr && ed.space_locked;
+  const own = new Set((ed?.reservation_items || []).map(i => i.space_id));
+  // Conserva lo que ya estaba marcado (y, al editar, los espacios de la reserva)
   const keep = new Set([...document.querySelectorAll('[name=sp]:checked')].map(x => x.value));
-  if (S.edit && !S.editInit) { S.editInit = 1; S.edit.reservation_items.forEach(i => keep.add(i.space_id)); }
+  if (ed && !S.editInit) { S.editInit = 1; own.forEach(id => keep.add(id)); }
   box.textContent = 'Consultando…';
-  const act = S.spaces.filter(s => s.active);
-  // Disponibilidad en la base de datos + lo que ya está en Google Calendar (incluye reservas manuales)
+  let act = S.spaces.filter(s => s.active);
+  if (locked) act = act.filter(s => own.has(s.id)); // sala asignada por la administración: no se cambia
+  // Disponibilidad en la base de datos + lo que ya está en Google Calendar (incluye reservas manuales).
+  // Al editar, la propia reserva no cuenta como ocupación.
   const [dbSt, cal] = await Promise.all([
-    Promise.all(act.map(s => sb.rpc('check_availability', {p_space: s.id, p_start: a, p_end: b}).then(r => r.data))),
-    calendarBusy(a, b)]);
+    Promise.all(act.map(s => sb.rpc('check_availability_for', {p_space: s.id, p_start: a, p_end: b, p_exclude: ed?.id ?? null}).then(r => r.data))),
+    calendarBusy(a, b, ed?.id)]);
   const st = act.map((s, i) => dbSt[i] === 'available' && cal && cal[s.id] ? 'calendar_busy' : dbSt[i]);
   const warn = cal ? '' : '<p><small>No se pudo consultar Google Calendar: la lista podría no incluir reservas ingresadas a mano.</small></p>';
-  box.innerHTML = warn + act.map((s, i) => `<label class="row ${st[i] !== 'available' ? 'off' : ''}"><input type="checkbox" name="sp" value="${s.id}" ${st[i] !== 'available' ? 'disabled' : (keep.has(s.id) ? 'checked' : '')}>
-  <b>${esc(s.name)}</b><small>${s.kind === 'room' ? 'Sala' : 'Recurso'}${s.capacity ? ' · ' + s.capacity + ' personas' : ''}${feats(s)}</small>
-  <span class="tag ${st[i]}">${LBL[st[i]] || st[i]}</span></label>`).join('') || 'No hay salas ni recursos habilitados.';
+  const note = locked ? '<p><small>La administración asignó la sala de esta reserva: puede cambiar la fecha y la hora, pero no la sala.</small></p>' : '';
+  box.innerHTML = warn + note + act.map((s, i) => {
+    const needs = s.requires_approval !== false;
+    const blockedByRule = editAppr && !locked && needs; // al editar una reserva aprobada no se pueden sumar espacios con aprobación
+    const off = st[i] !== 'available' || blockedByRule || locked;
+    const checked = !blockedByRule && st[i] === 'available' && keep.has(s.id) || (locked && true);
+    const tagKey = blockedByRule && st[i] === 'available' ? 'needs' : st[i];
+    return `<label class="row ${off && !locked ? 'off' : ''}"><input type="checkbox" name="sp" value="${s.id}" ${off ? 'disabled' : ''} ${checked ? 'checked' : ''}>
+  <b>${esc(s.name)}</b><small>${s.kind === 'room' ? 'Sala' : 'Recurso'}${s.capacity ? ' · ' + s.capacity + ' personas' : ''}${feats(s)} · ${needs ? 'Requiere aprobación' : 'Se aprueba automáticamente'}</small>
+  <span class="tag ${tagKey === 'needs' ? 'inactive' : st[i]}">${tagKey === 'needs' ? 'Requiere solicitud nueva' : (LBL[st[i]] || st[i])}</span></label>`;
+  }).join('') || 'No hay salas ni recursos habilitados.';
 }
 async function submit(e) {
   e.preventDefault();
   const [a, b] = range();
   if (!a) return msg('Revise la fecha y las horas.', 1);
+  if (new Date(a) > Date.now() + MAXDAYS * 864e5) return msg(ERR.too_far, 1);
   const ids = [...document.querySelectorAll('[name=sp]:checked')].map(x => x.value);
   if (!ids.length) return msg(ERR.no_spaces, 1);
-  const cal = await calendarBusy(a, b); // revisión final por si alguien reservó mientras tanto
+  const ed = S.edit, editAppr = ed?.status === 'approved';
+  const cal = await calendarBusy(a, b, ed?.id); // revisión final por si alguien reservó mientras tanto
   if (cal && ids.some(i => cal[i])) return msg('Alguno de los espacios ya tiene una reserva en ese horario. Vuelva a elegir.', 1);
-  const ed = S.edit;
-  const ok = await ask(ed ? '¿Desea guardar los cambios de la solicitud de reserva?' : '¿Desea enviar la solicitud de reserva?',
-    [...S.spaces.filter(s => ids.includes(s.id)).map(spaceLine), ...when(a, b)],
-    ed ? 'Guardar cambios' : 'Enviar solicitud', 'Volver');
+  const chosen = S.spaces.filter(s => ids.includes(s.id));
+  const auto = chosen.every(s => s.requires_approval === false);
+  let q, okTxt, extra = [];
+  if (ed) { q = editAppr ? '¿Desea guardar los cambios de la reserva?' : '¿Desea guardar los cambios de la solicitud de reserva?'; okTxt = 'Guardar cambios'; }
+  else if (auto) { q = '¿Desea confirmar la reserva?'; okTxt = 'Confirmar reserva'; extra = ['Se aprueba automáticamente.']; }
+  else { q = '¿Desea enviar la solicitud de reserva?'; okTxt = 'Enviar solicitud'; extra = ['Requiere aprobación de la administración.']; }
+  const ok = await ask(q, [...chosen.map(spaceLine), ...when(a, b), ...extra], okTxt, 'Volver');
   if (!ok) return;
   const pf = {user_id: S.user.id, email: S.user.email, full_name: $('#nm').value.trim(), phone: $('#ph').value.trim(), updated_at: new Date().toISOString()};
   let r = await sb.from('profiles').upsert(pf);
   if (r.error) return msg(err(r.error), 1);
   S.profile = pf;
   const f = {p_purpose: $('#pp').value, p_attendees: +$('#at').value || null, p_start: a, p_end: b, p_space_ids: ids};
-  if (ed) {
-    r = await sb.rpc('update_my_reservation', {p_reservation: ed.id, ...f});
-    if (r.error) return msg(err(r.error), 1);
-    sb.functions.invoke('notify', {body: {reservation_id: ed.id, event: 'edited'}}).catch(() => {}); // aviso a administradores
-    msg('Solicitud actualizada. Sigue pendiente de revisión.');
+  let text;
+  if (editAppr) {
+    // Reserva aprobada: se revalida en base de datos y Calendar; si no se puede, se conserva la original
+    r = await sb.functions.invoke('reserve', {body: {action: 'edit', reservation_id: ed.id, purpose: f.p_purpose, attendees: f.p_attendees, start: a, end: b, space_ids: ids}});
+    const out = r.data;
+    if (r.error || !out) return msg('No se pudo guardar el cambio. Se conservó la reserva original.', 1);
+    if (!out.ok) return msg(err({message: out.error || ''}) || 'No se pudo guardar el cambio. Se conservó la reserva original.', 1);
+    sb.functions.invoke('notify', {body: {reservation_id: ed.id, event: 'edited'}}).catch(() => {});
+    text = out.calendar_ok ? 'Reserva actualizada y registrada en el calendario.' : 'Reserva actualizada. El calendario podría tardar en reflejarlo; la administración puede revisarlo.';
   } else {
-    r = await sb.rpc('submit_reservation', f);
-    if (r.error) return msg(err(r.error), 1);
-    sb.functions.invoke('notify', {body: {reservation_id: r.data, event: 'new'}}).catch(() => {}); // aviso a administradores (si falla, no afecta la solicitud)
-    msg('Solicitud enviada. Queda pendiente de revisión.');
+    const isNew = !ed;
+    if (ed) {
+      r = await sb.rpc('update_my_reservation', {p_reservation: ed.id, ...f});
+      if (r.error) return msg(err(r.error), 1);
+    } else {
+      r = await sb.rpc('submit_reservation', f);
+      if (r.error) return msg(err(r.error), 1);
+    }
+    const rid = ed ? ed.id : r.data;
+    let approved = false, reason = '';
+    if (auto) {
+      try {
+        const x = await sb.functions.invoke('reserve', {body: {action: 'auto_approve', reservation_id: rid}});
+        approved = !!x.data?.approved; reason = x.data?.reason || (x.error ? 'calendar_error' : '');
+      } catch (_) { reason = 'calendar_error'; }
+    }
+    if (approved) {
+      sb.functions.invoke('notify', {body: {reservation_id: rid, event: 'auto'}}).catch(() => {});
+      text = 'Reserva confirmada. Quedó aprobada y registrada en el calendario.';
+    } else {
+      sb.functions.invoke('notify', {body: {reservation_id: rid, event: isNew ? 'new' : 'edited'}}).catch(() => {});
+      if (auto && reason === 'calendar_conflict') text = 'Ese horario ya tiene una reserva en el calendario. Su solicitud quedó pendiente de revisión.';
+      else if (auto && reason !== 'not_pending') text = 'No se pudo confirmar automáticamente. Su solicitud quedó pendiente de revisión.';
+      else text = isNew ? 'Solicitud enviada. Queda pendiente de revisión.' : 'Solicitud actualizada. Sigue pendiente de revisión.';
+    }
   }
+  msg(text);
   S.edit = null; S.tab = 'mine'; shell();
 }
 
@@ -278,14 +329,23 @@ async function mineView() {
   const wasOpen = document.querySelector('#view details.hist')?.open; // para no plegar el historial al refrescar
   $('#view').textContent = 'Cargando…';
   const since = new Date(Date.now() - 30 * 864e5).toISOString(); // historial: últimos 30 días
-  const {data, error} = await sb.from('reservations').select('*, reservation_items(space_id, spaces(name))').eq('requester_id', S.user.id).gte('ends_at', since).order('starts_at', {ascending: false});
+  const {data, error} = await sb.from('reservations').select('*, reservation_items(space_id, spaces(name, requires_approval))').eq('requester_id', S.user.id).gte('ends_at', since).order('starts_at', {ascending: false});
   if (error) return msg(err(error), 1);
   S.mine = Object.fromEntries((data || []).map(r => [r.id, r]));
+  // Editar: solicitudes pendientes siempre; reservas aprobadas solo con 24 h o más de anticipación y si todos sus espacios son de aprobación automática
+  const actions = r => {
+    const cancel = '<button class="sec" data-act="cx" data-id="' + r.id + '">Cancelar reserva</button>';
+    if (r.status === 'pending') return '<div><button data-act="em" data-id="' + r.id + '">Editar solicitud</button> ' + cancel + '</div>';
+    const auto = (r.reservation_items || []).every(i => i.spaces?.requires_approval === false);
+    if (new Date(r.starts_at) - Date.now() < 24 * 36e5) return '<div>' + cancel + '</div><small class="muted">Faltan menos de 24 horas: solo puede cancelar.</small>';
+    if (!auto) return '<div>' + cancel + '</div><small class="muted">Para cambiar esta reserva, comuníquese con la administración o cancélela.</small>';
+    return '<div><button data-act="em" data-id="' + r.id + '">Editar reserva</button> ' + cancel + '</div>';
+  };
   const card = r => `<div class="card"><span class="tag ${r.status}">${LBL[r.status]}</span>
   <h3>${esc(names(r))}</h3><div>${rango(r)}</div>
   ${r.was_modified ? '<small>La administración ajustó el horario o los datos solicitados.</small><br>' : ''}
   ${r.admin_note ? '<small>Nota: ' + esc(r.admin_note) + '</small>' : ''}
-  ${['pending', 'approved'].includes(r.status) && new Date(r.ends_at) > new Date() ? '<div>' + (r.status === 'pending' ? '<button data-act="em" data-id="' + r.id + '">Editar solicitud</button> ' : '') + '<button class="sec" data-act="cx" data-id="' + r.id + '">Cancelar reserva</button></div>' : ''}</div>`;
+  ${['pending', 'approved'].includes(r.status) && new Date(r.ends_at) > new Date() ? actions(r) : ''}</div>`;
   // Arriba: próximas y pendientes (la más cercana primero). Abajo: historial plegado (la más reciente primero).
   const all = data || [], now = new Date();
   const active = all.filter(r => ['pending', 'approved'].includes(r.status) && new Date(r.ends_at) > now)
@@ -312,7 +372,7 @@ async function adminView() {
   S.res = Object.fromEntries(list.map(r => [r.id, r]));
   const rc = r => `<div class="card" data-id="${r.id}"><span class="tag ${r.status}">${LBL[r.status]}</span>
   <b>${esc(r.requester_name)}</b> <small>${esc(r.requester_email)} · ${esc(r.requester_phone || '')}</small>
-  <div>${esc(names(r))} <small>· ${r.attendees || '?'} personas</small></div><p>${esc(r.purpose || '')}</p>
+  <div>${esc(names(r))} <small>· ${r.attendees || '?'} personas</small></div>${r.auto_approved ? '<small class="muted">Aprobada automáticamente (sin intervención de la administración).</small>' : ''}<p>${esc(r.purpose || '')}</p>
   <div class="g"><label>Inicio<input type="datetime-local" class="s" value="${loc(r.starts_at)}"></label>
   <label>Fin<input type="datetime-local" class="e" value="${loc(r.ends_at)}"></label>
   <label>Nota para la persona<input class="n" value="${esc(r.admin_note)}"></label></div>
@@ -323,7 +383,7 @@ async function adminView() {
   $('#view').innerHTML = `<h2>Solicitudes pendientes</h2>${pend.map(rc).join('') || '<p class="muted">No hay solicitudes pendientes.</p>'}
   <h2>Reservas aprobadas próximas</h2>${appr.map(rc).join('') || '<p class="muted">No hay reservas aprobadas próximas.</p>'}
   <div class="card"><h2>Salas y recursos</h2>
-  ${S.spaces.map(s => `<div class="row"><b>${esc(s.name)}</b><small>${s.kind === 'room' ? 'Sala' : 'Recurso'}${feats(s)}</small>
+  ${S.spaces.map(s => `<div class="row"><b>${esc(s.name)}</b><small>${s.kind === 'room' ? 'Sala' : 'Recurso'}${feats(s)} · ${s.requires_approval === false ? 'Aprobación automática' : 'Requiere aprobación'}</small>
   <span class="tag ${s.active ? 'available' : 'inactive'}">${s.active ? 'Habilitado' : 'Deshabilitado'}</span>
   <button class="sec" data-act="ed" data-id="${s.id}">Editar</button></div>`).join('')}
   <br><button data-act="ed" data-id="new">Agregar sala o recurso</button><div id="ef"></div></div>
@@ -369,7 +429,7 @@ async function decide(btn, kind) {
 }
 
 function editSpace(id) {
-  const s = S.spaces.find(x => x.id === id) || {active: true, kind: 'room', space_features: []};
+  const s = S.spaces.find(x => x.id === id) || {active: true, kind: 'room', requires_approval: true, space_features: []};
   const have = new Set(s.space_features.map(x => x.feature_id));
   $('#ef').innerHTML = `<form id="sf" class="card" data-id="${s.id || ''}"><div class="g">
   <label>Nombre<input id="sn" required value="${esc(s.name)}"></label>
@@ -378,15 +438,18 @@ function editSpace(id) {
   <label>ID del calendario de Google<input id="sg" value="${esc(s.google_calendar_id)}"></label>
   <label>Descripción<input id="sd" value="${esc(s.description)}"></label>
   <label><input type="checkbox" id="sa" ${s.active ? 'checked' : ''}>Habilitado para reservas</label>
+  <label><input type="checkbox" id="sr" ${s.requires_approval === false ? 'checked' : ''}>Se aprueba automáticamente (si no, cada solicitud espera la decisión de la administración)</label>
   <div>${S.features.map(f => `<label class="chip"><input type="checkbox" name="ft" value="${f.id}" ${have.has(f.id) ? 'checked' : ''}>${esc(f.name)}</label>`).join('')}</div>
   <label>Agregar característica nueva<input id="nf" placeholder="Ej. Pizarra"></label><button>Guardar cambios</button></form>`;
   $('#sf').onsubmit = saveSpace;
+  if (!s.id) $('#sk').onchange = () => { $('#sr').checked = $('#sk').value === 'resource'; }; // espacio nuevo: los recursos nacen con aprobación automática
+  if (!s.id) $('#sr').checked = false;
 }
 async function saveSpace(e) {
   e.preventDefault();
   const id = e.target.dataset.id;
   const row = {name: $('#sn').value.trim(), kind: $('#sk').value, capacity: +$('#sc').value || null, google_calendar_id: $('#sg').value.trim() || null,
-    description: $('#sd').value.trim() || null, active: $('#sa').checked};
+    description: $('#sd').value.trim() || null, active: $('#sa').checked, requires_approval: !$('#sr').checked};
   const r = id ? await sb.from('spaces').update(row).eq('id', id).select().single() : await sb.from('spaces').insert(row).select().single();
   if (r.error) return msg(err(r.error), 1);
   const fids = [...document.querySelectorAll('[name=ft]:checked')].map(x => +x.value), nf = $('#nf').value.trim();
