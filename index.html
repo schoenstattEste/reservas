@@ -55,7 +55,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}dialog h3{margin:0 0 12px;font-size:
 .inc-tag{display:none}.tile.inc .inc-tag{display:inline-flex}.tile.inc .bdg:not(.inc-tag){display:none}
 .cw{color:var(--warn)}.tile a.mail{position:relative;z-index:3;color:var(--ac);word-break:break-all}
 button.lnk{background:none;border:0;color:var(--ac);text-decoration:underline;padding:10px 0;font-weight:600}
-.sumbar{position:sticky;bottom:0;z-index:2;display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px -14px -14px;padding:12px 14px;background:var(--card);border-top:1px solid var(--line);box-shadow:0 -6px 16px rgba(0,0,0,.08);border-radius:0 0 8px 8px}
+.sumbar[hidden]{display:none}.sumbar{position:sticky;bottom:0;z-index:2;display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px -14px -14px;padding:12px 14px;background:var(--card);border-top:1px solid var(--line);box-shadow:0 -6px 16px rgba(0,0,0,.08);border-radius:0 0 8px 8px}
 .sum{flex:1;min-width:200px;display:flex;flex-direction:column}.sum b{font-size:1.02rem}.sum .ok{color:var(--ok)}.sum .wait{color:var(--warn)}
 /* Pantalla de entrada */
 .login{max-width:440px;margin:20px auto;padding:22px;border-top:5px solid var(--gold)}
@@ -75,7 +75,7 @@ button.lnk{background:none;border:0;color:var(--ac);text-decoration:underline;pa
 /* ============ 1. CONFIGURACIÓN (lo único que debe editar para empezar) ============ */
 const SUPABASE_URL = 'https://zwypvyhxyvpkmlkwimyx.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_UGXL0ookgPQXW5guuHMwbA_a6qi_ECZ';
-
+  
 /* ============ 2. TEXTOS (se pueden cambiar sin riesgo) ============ */
 const TITLE = 'Reserva de salas y recursos';
 const LOGO_URL = 'logo.png'; // archivo subido junto a index.html, o una dirección completa (https://...). Vacío = sin logo
@@ -237,7 +237,7 @@ function newView() {
   <label>Hora de fin<input type="time" id="t2" required value="${ee.slice(11, 16)}"></label><label>Asistentes<input type="number" id="at" min="1" value="${ed?.attendees ?? ''}"></label></div>
   <label>Motivo de la reunión<textarea id="pp" rows="2">${esc(ed?.purpose)}</textarea></label>
   <h3>Salas y recursos</h3><div id="av" class="muted">Elija fecha y horario para ver qué está disponible.</div><br>
-  <div class="sumbar"><div class="sum"><small>Seleccionado</small><b id="sumtxt">Aún no ha elegido ninguna</b><span id="summsg" class="muted">Elija una o más salas o recursos.</span></div>
+  <div class="sumbar" id="sumbar" hidden><div class="sum"><small>Seleccionado</small><b id="sumtxt">Aún no ha elegido ninguna</b><span id="summsg" class="muted">Elija una o más salas o recursos.</span></div>
   <div><button id="go">${ed ? 'Guardar cambios' : 'Continuar'}</button>${ed ? ' <button type="button" class="sec" data-act="tab" data-t="mine">Volver sin guardar</button>' : ''}</div></div></form>`;
   S.showNA = false; S.av = null;
   $('#at').oninput = () => S.av && renderAvail(); // la capacidad se compara con los asistentes
@@ -360,6 +360,8 @@ function updateSummary() {
   const chosen = [...document.querySelectorAll('[name=sp]:checked')].map(x => S.spaces.find(s => s.id === x.value)).filter(Boolean);
   const names = [...(bld ? [bld.name + ' completa'] : []), ...chosen.map(s => s.name)];
   const auto = !bld && chosen.every(s => s.requires_approval === false);
+  // La franja (y el botón) aparece solo cuando hay al menos una sala o recurso elegido; al editar se muestra siempre para poder volver
+  $('#sumbar').hidden = !names.length && !ed;
   t.textContent = names.length ? names.join(' + ') : 'Aún no ha elegido ninguna';
   const m = $('#summsg');
   if (!names.length) { m.className = 'muted'; m.textContent = 'Elija una o más salas o recursos.'; }
