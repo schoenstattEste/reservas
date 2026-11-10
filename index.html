@@ -34,6 +34,29 @@ dialog{font:inherit;border:1px solid var(--line);border-radius:10px;padding:20px
 dialog::backdrop{background:rgba(0,0,0,.45)}dialog h3{margin:0 0 12px;font-size:1.1rem}.dl{margin-bottom:18px;line-height:1.6}.da{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 #msg{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:92%;padding:10px 16px;border-radius:8px;color:#fff;z-index:9}
 #msg.ok{background:var(--ok)}#msg.bad{background:var(--bad)}
+/* Lista de salas y recursos en la solicitud: tarjetas agrupadas */
+.note{background:var(--bg);border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:8px;padding:10px 12px;margin:0 0 6px;font-size:.92rem}
+.sec-h{display:flex;align-items:baseline;gap:8px;margin:20px 0 8px}.sec-h h4{margin:0;font-size:1.02rem;color:var(--ac)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.tile{position:relative;display:flex;flex-direction:column;gap:4px;margin:0;padding:12px;min-height:92px;background:var(--card);border:1.5px solid var(--line);border-radius:10px;color:var(--ink);font-size:1rem}
+.tile input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+.tile:has(input:disabled){cursor:not-allowed}.tile:has(input:disabled) input{cursor:not-allowed}
+.tile:has(input:focus-visible){outline:3px solid var(--ac);outline-offset:2px}
+.tile:hover:not(.na):not(.inc){border-color:var(--ac)}
+.tile:has(input:checked){border-color:var(--ac);background:color-mix(in srgb,var(--ac) 10%,var(--card))}
+.tile.wide{grid-column:1/-1;min-height:0;border-color:var(--gold)}
+.tile.na{opacity:.7;background:var(--bg)}.tile.inc{background:var(--bg);border-style:dashed;color:var(--mut)}
+.tile b{font-size:1rem;line-height:1.25;padding-right:28px}.tile small{line-height:1.3}
+.chk{position:absolute;top:10px;right:10px;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--line);background:var(--card);display:flex;align-items:center;justify-content:center;color:var(--acink)}
+.chk svg{opacity:0}.tile:has(input:checked) .chk{background:var(--ac);border-color:var(--ac)}.tile:has(input:checked) .chk svg{opacity:1}
+.tile.na .chk,.tile.inc .chk{display:none}
+.bdg{display:inline-flex;white-space:nowrap;align-items:center;font-size:.78rem;font-weight:600;padding:2px 8px;border-radius:99px;border:1px solid currentColor;width:fit-content}
+.bdg.fast{color:var(--ok)}.bdg.appr{color:var(--warn)}.bdg.grey{color:var(--mut)}
+.inc-tag{display:none}.tile.inc .inc-tag{display:inline-flex}.tile.inc .bdg:not(.inc-tag){display:none}
+.cw{color:var(--warn)}.tile a.mail{position:relative;z-index:3;color:var(--ac);word-break:break-all}
+button.lnk{background:none;border:0;color:var(--ac);text-decoration:underline;padding:10px 0;font-weight:600}
+.sumbar{position:sticky;bottom:0;z-index:2;display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px -14px -14px;padding:12px 14px;background:var(--card);border-top:1px solid var(--line);box-shadow:0 -6px 16px rgba(0,0,0,.08);border-radius:0 0 8px 8px}
+.sum{flex:1;min-width:200px;display:flex;flex-direction:column}.sum b{font-size:1.02rem}.sum .ok{color:var(--ok)}.sum .wait{color:var(--warn)}
 /* Pantalla de entrada */
 .login{max-width:440px;margin:20px auto;padding:22px;border-top:5px solid var(--gold)}
 .brand{text-align:center;margin-bottom:8px}.brand img{display:block;width:96px;height:96px;object-fit:contain;margin:0 auto 10px}
@@ -214,7 +237,10 @@ function newView() {
   <label>Hora de fin<input type="time" id="t2" required value="${ee.slice(11, 16)}"></label><label>Asistentes<input type="number" id="at" min="1" value="${ed?.attendees ?? ''}"></label></div>
   <label>Motivo de la reunión<textarea id="pp" rows="2">${esc(ed?.purpose)}</textarea></label>
   <h3>Salas y recursos</h3><div id="av" class="muted">Elija fecha y horario para ver qué está disponible.</div><br>
-  <button>${ed ? 'Guardar cambios' : 'Continuar'}</button>${ed ? ' <button type="button" class="sec" data-act="tab" data-t="mine">Volver sin guardar</button>' : ''}</form>`;
+  <div class="sumbar"><div class="sum"><small>Seleccionado</small><b id="sumtxt">Aún no ha elegido ninguna</b><span id="summsg" class="muted">Elija una o más salas o recursos.</span></div>
+  <div><button id="go">${ed ? 'Guardar cambios' : 'Continuar'}</button>${ed ? ' <button type="button" class="sec" data-act="tab" data-t="mine">Volver sin guardar</button>' : ''}</div></div></form>`;
+  S.showNA = false; S.av = null;
+  $('#at').oninput = () => S.av && renderAvail(); // la capacidad se compara con los asistentes
   ['dt','t1','t2'].forEach(i => $('#' + i).onchange = avail);
   $('#f').onsubmit = submit;
   if (ed) avail();
@@ -244,45 +270,103 @@ async function calendarConflicts(rid, a, b, ids) {
 }
 async function avail() {
   const [a, b] = range(), box = $('#av'), ed = S.edit;
-  if (!a) { box.textContent = 'Revise que la hora de fin sea posterior a la de inicio.'; return; }
+  if (!a) { S.av = null; box.textContent = 'Revise que la hora de fin sea posterior a la de inicio.'; updateSummary(); return; }
   const editAppr = ed?.status === 'approved', locked = editAppr && ed.space_locked;
-  const own = new Set((ed?.reservation_items || []).map(i => i.space_id));
-  // Conserva lo que ya estaba marcado (y, al editar, los espacios de la reserva)
-  const keep = new Set([...document.querySelectorAll('[name=sp]:checked')].map(x => x.value));
-  if (ed && !S.editInit) { S.editInit = 1; own.forEach(id => keep.add(id)); }
+  let initKeep = null;
+  if (ed && !S.editInit) { S.editInit = 1; initKeep = new Set((ed.reservation_items || []).map(i => i.space_id)); }
   box.textContent = 'Consultando…';
   let act = S.spaces.filter(s => s.active);
-  if (locked) act = act.filter(s => own.has(s.id)); // sala asignada por la administración: no se cambia
+  if (locked) act = act.filter(s => (ed.reservation_items || []).some(i => i.space_id === s.id)); // sala asignada por la administración: no se cambia
   // Disponibilidad en la base de datos + lo que ya está en Google Calendar (incluye reservas manuales).
   // Al editar, la propia reserva no cuenta como ocupación.
   const [dbSt, cal] = await Promise.all([
     Promise.all(act.map(s => sb.rpc('check_availability_for', {p_space: s.id, p_start: a, p_end: b, p_exclude: ed?.id ?? null}).then(r => r.data))),
     calendarBusy(a, b, ed?.id)]);
   const st = act.map((s, i) => dbSt[i] === 'available' && cal && cal[s.id] ? 'calendar_busy' : dbSt[i]);
-  const warn = cal ? '' : '<p><small>No se pudo consultar Google Calendar: la lista podría no incluir reservas ingresadas a mano.</small></p>';
-  const note = locked ? '<p><small>La administración asignó la sala de esta reserva: puede cambiar la fecha y la hora, pero no la sala.</small></p>' : '';
+  S.av = {a, b, act, st, cal, ed, editAppr, locked, initKeep};
+  renderAvail();
+}
+// Dibuja la lista (sin volver a consultar): agrupada por edificio, con las no disponibles ocultas
+const CHK = '<span class="chk"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>';
+const featText = s => (s.space_features || []).map(x => x.features.name + (x.detail ? ' ' + x.detail : '')).join(', ');
+function renderAvail() {
+  const av = S.av, box = $('#av');
+  if (!av || !box) return;
+  const {a, b, act, st, cal, ed, editAppr, locked} = av;
+  const keep = new Set([...document.querySelectorAll('[name=sp]:checked')].map(x => x.value));
+  if (av.initKeep) { av.initKeep.forEach(id => keep.add(id)); av.initKeep = null; }
   const keepB = new Set([...document.querySelectorAll('[name=bld]:checked')].map(x => x.value));
-  // Edificio completo: todas las salas activas del edificio (no incluye recursos). Solo al crear una solicitud nueva.
-  const bRows = ed ? '' : S.buildings.filter(b => b.allow_whole).map(b => {
-    const rooms = act.map((s, i) => [s, i]).filter(([s]) => s.kind === 'room' && s.building_id === b.id);
-    if (!rooms.length) return '';
-    const busy = [...rooms.filter(([, i]) => st[i] !== 'available').map(([s]) => s.name), ...(cal && cal[b.id] ? ['calendario ' + b.name] : [])], free = !busy.length;
-    return `<label class="row ${free ? '' : 'off'}"><input type="checkbox" name="bld" value="${b.id}" ${free ? (keepB.has(b.id) ? 'checked' : '') : 'disabled'}>
-  <b>${esc(b.name)} completa</b><small>Todas las salas del edificio (no incluye recursos) · Requiere aprobación${free ? '' : ' · Ocupadas: ' + esc(busy.join(', '))}</small>
-  <span class="tag ${free ? 'available' : 'booked'}">${free ? 'Disponible' : 'No disponible'}</span></label>`;
-  }).join('');
-  box.innerHTML = warn + note + bRows + act.map((s, i) => {
+  const att = +$('#at')?.value || 0;
+  let hiddenN = 0;
+
+  const tile = (s, i) => {
     const needs = s.requires_approval !== false;
     const blockedByRule = editAppr && !locked && needs; // al editar una reserva aprobada no se pueden sumar espacios con aprobación
-    const off = st[i] !== 'available' || blockedByRule || locked;
-    const checked = !blockedByRule && st[i] === 'available' && keep.has(s.id) || (locked && true);
-    const tagKey = blockedByRule && st[i] === 'available' ? 'needs' : st[i];
-    return `<label class="row ${off && !locked ? 'off' : ''}"><input type="checkbox" name="sp" value="${s.id}" data-b="${s.kind === 'room' ? (s.building_id || '') : ''}" data-off="${off ? 1 : 0}" ${off ? 'disabled' : ''} ${checked ? 'checked' : ''}>
-  <b>${esc(s.name)}</b><small>${s.kind === 'room' ? 'Sala' : 'Recurso'}${s.capacity ? ' · ' + s.capacity + ' personas' : ''}${feats(s)} · ${needs ? 'Requiere aprobación' : 'Se aprueba automáticamente'}${cal && s.building_id && cal[s.building_id] && st[i] === 'calendar_busy' ? ' · ' + esc(S.buildings.find(b => b.id === s.building_id)?.name || 'El edificio') + ' ocupada en el calendario' : ''}</small>
-  <span class="tag ${tagKey === 'needs' ? 'inactive' : st[i]}">${tagKey === 'needs' ? 'Requiere solicitud nueva' : (LBL[st[i]] || st[i])}</span></label>`;
-  }).join('') || 'No hay salas ni recursos habilitados.';
+    const unavailable = st[i] !== 'available';
+    const off = unavailable || blockedByRule || locked;
+    if (off && !locked && !S.showNA) { hiddenN++; return ''; }
+    const checked = !blockedByRule && !unavailable && keep.has(s.id) || locked;
+    const bName = s.building_id ? esc(S.buildings.find(x => x.id === s.building_id)?.name || 'El edificio') : '';
+    const why = unavailable && cal && s.building_id && cal[s.building_id] && st[i] === 'calendar_busy' ? bName + ' ocupada en el calendario' : '';
+    const meta = [s.capacity ? s.capacity + ' personas' : '', esc(featText(s))].filter(Boolean).join(' · ');
+    const badge = unavailable ? '<span class="bdg grey">No disponible</span>' : blockedByRule ? '<span class="bdg grey">Requiere solicitud nueva</span>'
+      : needs ? '<span class="bdg appr">Con aprobación</span>' : '<span class="bdg fast">Inmediata</span>';
+    return `<label class="tile ${off && !locked ? 'na' : ''}"><input type="checkbox" name="sp" value="${s.id}" data-b="${s.kind === 'room' ? (s.building_id || '') : ''}" data-off="${off ? 1 : 0}" ${off ? 'disabled' : ''} ${checked ? 'checked' : ''}>${CHK}
+  <b>${esc(s.name)}</b>${meta ? '<small class="muted">' + meta + '</small>' : ''}${why ? '<small class="muted">' + why + '</small>' : ''}
+  <span>${badge}<span class="bdg grey inc-tag">Incluida en la casa completa</span></span>
+  ${att && s.kind === 'room' && s.capacity && s.capacity < att && !off ? '<small class="cw">Capacidad menor a su grupo (' + att + ')</small>' : ''}</label>`;
+  };
+  const byName = (x, y) => x[0].name.localeCompare(y[0].name, 'es');
+  const pairs = act.map((s, i) => [s, i]);
+  const rooms = pairs.filter(([s]) => s.kind === 'room'), res = pairs.filter(([s]) => s.kind !== 'room').sort(byName);
+  const blds = [...S.buildings].sort((x, y) => (y.allow_whole - x.allow_whole) || x.name.localeCompare(y.name, 'es'));
+  const known = new Set(blds.map(x => x.id));
+  const groups = [
+    ...blds.map(bd => ({bd, title: bd.name, sub: '', items: rooms.filter(([s]) => s.building_id === bd.id).sort(byName)})),
+    {bd: null, title: blds.length ? 'Otras salas' : 'Salas', sub: '', items: rooms.filter(([s]) => !known.has(s.building_id)).sort(byName)},
+    {bd: null, title: 'Recursos', sub: 'Agréguelos a su reserva', items: res}];
+
+  let html = '';
+  for (const g of groups) {
+    let feat = '';
+    // Edificio completo: todas las salas activas del edificio (no incluye recursos). Solo al crear una solicitud nueva.
+    if (g.bd && g.bd.allow_whole && !ed && g.items.length) {
+      const busy = [...g.items.filter(([, i]) => st[i] !== 'available').map(([s]) => s.name), ...(cal && cal[g.bd.id] ? ['calendario ' + g.bd.name] : [])], free = !busy.length;
+      feat = `<label class="tile wide ${free ? '' : 'na'}"><input type="checkbox" name="bld" value="${g.bd.id}" ${free ? (keepB.has(g.bd.id) ? 'checked' : '') : 'disabled'}>${CHK}
+  <b>${esc(g.bd.name)} completa</b><small class="muted">Todas las salas del edificio, para actividades grandes (no incluye recursos)</small>
+  ${free ? '' : `<small class="cw">Ya existen reservas activas en este edificio en ese horario (Ocupadas: ${esc(busy.join(', '))}), por lo que no se puede seleccionar. Para solicitar la casa completa, escriba a ${HELP_EMAIL ? '<a class="mail" href="mailto:' + esc(HELP_EMAIL) + '">' + esc(HELP_EMAIL) + '</a>' : 'la administración'} o contacte al administrador de reservas.</small>`}
+  <span>${free ? '<span class="bdg appr">Con aprobación</span>' : '<span class="bdg grey">No disponible</span>'}</span></label>`;
+    }
+    const tiles = g.items.map(([s, i]) => tile(s, i)).join('');
+    if (!feat && !tiles) continue;
+    html += `<div class="sec-h"><h4>${esc(g.title)}</h4><small class="muted">${esc(g.sub)}</small></div><div class="tiles">${feat}${tiles}</div>`;
+  }
+  const none = !html ? '<p class="muted">No hay salas ni recursos disponibles en ese horario.</p>' : '';
+  const link = hiddenN || S.showNA ? `<button type="button" class="lnk sec" data-act="na">${S.showNA ? 'Ocultar las no disponibles' : 'Mostrar también las no disponibles (' + hiddenN + ')'}</button>` : '';
+  const warn = cal ? '' : '<p><small>No se pudo consultar Google Calendar: la lista podría no incluir reservas ingresadas a mano.</small></p>';
+  const note = locked ? '<p><small>La administración asignó la sala de esta reserva: puede cambiar la fecha y la hora, pero no la sala.</small></p>' : '';
+  box.innerHTML = `<div class="note">Solo se muestran las salas y recursos <b>disponibles</b> el ${esc(dia(a))}, de ${esc(hora(a))} a ${esc(hora(b))}. Si cambia la fecha o la hora, la lista se actualiza.</div>`
+    + warn + note + html + none + link;
+  box.onchange = updateSummary;
   document.querySelectorAll('[name=bld]').forEach(x => x.onchange = () => syncBld(x));
   syncBld();
+  updateSummary();
+}
+// Franja inferior: lo elegido y qué pasará al enviar
+function updateSummary() {
+  const t = $('#sumtxt'); if (!t) return;
+  const ed = S.edit, editAppr = ed?.status === 'approved';
+  const bld = S.buildings.find(x => x.id === document.querySelector('[name=bld]:checked')?.value) || null;
+  const chosen = [...document.querySelectorAll('[name=sp]:checked')].map(x => S.spaces.find(s => s.id === x.value)).filter(Boolean);
+  const names = [...(bld ? [bld.name + ' completa'] : []), ...chosen.map(s => s.name)];
+  const auto = !bld && chosen.every(s => s.requires_approval === false);
+  t.textContent = names.length ? names.join(' + ') : 'Aún no ha elegido ninguna';
+  const m = $('#summsg');
+  if (!names.length) { m.className = 'muted'; m.textContent = 'Elija una o más salas o recursos.'; }
+  else if (editAppr) { m.className = 'ok'; m.textContent = 'Los cambios se aplican al instante si el horario está libre.'; }
+  else if (auto) { m.className = 'ok'; m.textContent = 'Su reserva se confirmará al instante.'; }
+  else { m.className = 'wait'; m.textContent = 'Su solicitud pasará a revisión de la administración.'; }
+  $('#go').textContent = ed ? 'Guardar cambios' : !names.length ? 'Continuar' : auto ? 'Confirmar reserva' : 'Enviar solicitud';
 }
 // Al marcar un edificio completo, sus salas quedan incluidas (se muestran apagadas) y no se eligen una por una
 function syncBld(from) {
@@ -292,7 +376,7 @@ function syncBld(from) {
     const inc = !!x.dataset.b && on.has(x.dataset.b);
     if (inc) x.checked = false;
     x.disabled = inc || x.dataset.off === '1';
-    x.closest('.row').classList.toggle('off', inc || x.dataset.off === '1');
+    x.closest('.tile').classList.toggle('inc', inc);
   });
 }
 async function submit(e) {
@@ -525,6 +609,7 @@ const acts = {
   again: () => loginView(),
   tab: b => { S.tab = b.dataset.t; S.edit = null; shell(); },
   em: b => { S.edit = S.mine[b.dataset.id]; S.editInit = 0; S.tab = 'new'; shell(); },
+  na: () => { S.showNA = !S.showNA; renderAvail(); },
   eb: b => editBuilding(b.dataset.id),
   sx: async b => {
     const x = S.spaces.find(y => y.id === b.dataset.id);
