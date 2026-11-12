@@ -548,31 +548,15 @@ async function seriesSubmit({a, b, ids, bld, chosen, third, name, phone, mail}) 
     ...(bad ? ['Google Calendar no se pudo actualizar en ' + bad + ' fecha(s). Ábralas en Administración y pulse "Guardar cambios" para reintentar.'] : [])];
   if (skipped.length || bad) await tell('Serie creada', res); else msg(res[0] + ' Quedaron registradas en el calendario.');
 }
-// Cuadro para elegir una nueva hora de inicio y de fin
-function askTimes(title, lines, h1, h2) {
-  return new Promise(res => {
-    const d = document.createElement('dialog');
-    d.innerHTML = `<form method="dialog"><h3>${esc(title)}</h3><div class="dl">${lines.map(l => `<div>${esc(l)}</div>`).join('')}</div>
-      <div class="g"><label>Hora de inicio<input type="time" id="nh1" required value="${h1}"></label><label>Hora de fin<input type="time" id="nh2" required value="${h2}"></label></div>
-      <p id="nhe" class="bad" style="margin:6px 0" hidden></p>
-      <div class="da"><button value="no" class="sec" formnovalidate>Volver</button><button value="ok">Continuar</button></div></form>`;
-    d.addEventListener('close', () => { res(d.returnValue === 'ok' ? [d.querySelector('#nh1').value, d.querySelector('#nh2').value] : null); d.remove(); });
-    d.querySelector('form').addEventListener('submit', e => {
-      const ok = e.submitter?.value !== 'ok' || d.querySelector('#nh2').value > d.querySelector('#nh1').value;
-      if (!ok) { e.preventDefault(); const m = d.querySelector('#nhe'); m.textContent = 'La hora de fin debe ser posterior a la de inicio.'; m.hidden = false; }
-    });
-    const wasBusy = S.busy; if (wasBusy) $('#busy').hidden = true;
-    d.addEventListener('close', () => { if (wasBusy && S.busy) $('#busy').hidden = false; });
-    document.body.appendChild(d); d.showModal();
-  });
-}
 const hhmm = x => { const d = new Date(x); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
 // Cambiar la hora de esta fecha y de las siguientes de la serie
 async function shiftSeries(btn) {
   const r0 = S.res[btn.dataset.id]; if (!r0?.series_id) return;
   const list = Object.values(S.res).filter(x => x.series_id === r0.series_id && new Date(x.starts_at) >= new Date(r0.starts_at)).sort((x, y) => new Date(x.starts_at) - new Date(y.starts_at));
-  const t = await askTimes('Cambiar la hora desde esta fecha', ['Se aplica a ' + diaLargo(r0.starts_at) + ' y a las ' + (list.length - 1) + ' fecha(s) siguientes de la serie.', 'Horario actual: ' + horaTxt(r0.starts_at, r0.ends_at) + '.'], hhmm(r0.starts_at), hhmm(r0.ends_at));
-  if (!t) return;
+  const card = btn.closest('.card'), t = [card.querySelector('.th1').value, card.querySelector('.th2').value];
+  const note = card.querySelector('.n')?.value.trim() || '';
+  if (!t[0] || !t[1] || t[1] <= t[0]) return msg('La hora de fin debe ser posterior a la de inicio.', 1);
+  if (t[0] === hhmm(r0.starts_at) && t[1] === hhmm(r0.ends_at)) return msg('Indique una hora distinta de la actual.', 1);
   const nd = list.map(x => { const d = new Date(x.starts_at), ds = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
     return {r: x, s: new Date(ds + 'T' + t[0]).toISOString(), e: new Date(ds + 'T' + t[1]).toISOString()}; });
   busyText('Revisando las fechas…');
@@ -601,7 +585,7 @@ async function shiftSeries(btn) {
   const moved = r.data.moved || [];
   const kept = [...nd.filter((_, i) => st[i] !== 'ok').map(x => diaLargo(x.s)), ...(r.data.skipped || []).map(x => diaLargo(x.start))];
   const bad = await syncMany(moved.map(x => x.id), 'Actualizando el calendario');
-  if (moved.length) { busyText('Enviando el aviso por correo…'); sb.functions.invoke('notify', {body: {reservation_id: moved[0].id, event: 'series', kind: 'changed', schedule: 'Nuevo horario: ' + horaTxt(nd[0].s, nd[0].e), dates: moved.map(x => diaLargo(x.start)), skipped: kept}}).catch(() => {}); }
+  if (moved.length) { busyText('Enviando el aviso por correo…'); sb.functions.invoke('notify', {body: {reservation_id: moved[0].id, event: 'series', kind: 'changed', note, schedule: 'Nuevo horario: ' + horaTxt(nd[0].s, nd[0].e), dates: moved.map(x => diaLargo(x.start)), skipped: kept}}).catch(() => {}); }
   const res = ['Se cambió el horario en ' + moved.length + ' fecha(s).', ...(kept.length ? ['Conservan su horario anterior (' + kept.length + '): ' + kept.join('; ') + '.'] : []),
     ...(bad ? ['Google Calendar no se pudo actualizar en ' + bad + ' fecha(s). Ábralas y pulse "Guardar cambios" para reintentar.'] : [])];
   adminView();
@@ -618,7 +602,7 @@ async function cancelSeries(btn) {
   const up = await sb.from('reservations').update({status: 'cancelled', decided_by: S.user.id, decided_at: new Date().toISOString()}).in('id', list.map(x => x.id));
   if (up.error) return msg(err(up.error), 1);
   const bad = await syncMany(list.map(x => x.id), 'Quitando del calendario');
-  sb.functions.invoke('notify', {body: {reservation_id: list[0].id, event: 'series', kind: 'cancelled', dates: list.map(x => diaLargo(x.starts_at))}}).catch(() => {});
+  sb.functions.invoke('notify', {body: {reservation_id: list[0].id, event: 'series', kind: 'cancelled', note: btn.note || '', dates: list.map(x => diaLargo(x.starts_at))}}).catch(() => {});
   msg('Se cancelaron ' + list.length + ' reservas.' + (bad ? ' Google Calendar no se actualizó en ' + bad + ' fecha(s); revise el calendario.' : ''), !!bad);
   adminView();
 }
@@ -779,7 +763,8 @@ async function adminView() {
   ${r.auto_approved ? '<div><small class="muted">Aprobada automáticamente (sin intervención de la administración).</small></div>' : ''}${released(r).length ? '<div><small class="muted">Salas liberadas del edificio: ' + esc(released(r).join(', ')) + '</small></div>' : ''}${r.whole_building_id ? '<div><small class="muted">Edificio completo: para liberar salas, desmárquelas en "Cambiar sala o recurso" y pulse ' + (r.status === 'pending' ? 'Aprobar' : 'Guardar cambios') + '.</small></div>' : ''}
   ${r.series_id && r.status === 'approved' ? `<label>¿Qué desea hacer con esta fecha?<select class="ac"><option value="">Elegir una acción…</option><option value="room">Cambiar sala o recurso</option><option value="time">Cambiar hora desde esta fecha</option><option value="one">Cancelar esta fecha</option><option value="from">Cancelar esta y las siguientes</option></select></label>
   <div class="ap" data-p="room" hidden>${spacePickBody(r)}</div>
-  <label class="ap" data-p="room one" hidden>Nota para la persona<input class="n" value="${esc(r.admin_note)}"></label>
+  <div class="ap g" data-p="time" hidden><label>Nueva hora de inicio<input type="time" class="th1" value="${hhmm(r.starts_at)}"></label><label>Nueva hora de fin<input type="time" class="th2" value="${hhmm(r.ends_at)}"></label></div>
+  <label class="ap" data-p="room one time from" hidden>Nota para la persona<input class="n" value="${esc(r.admin_note)}"></label>
   <div><button class="go" data-act="sgo" data-id="${r.id}" disabled>Elegir una acción</button></div>` : `<div class="g"><label>Inicio<input type="datetime-local" class="s" value="${loc(r.starts_at)}"></label>
   <label>Fin<input type="datetime-local" class="e" value="${loc(r.ends_at)}"></label>
   <label>Nota para la persona<input class="n" value="${esc(r.admin_note)}"></label></div>
@@ -947,7 +932,7 @@ const acts = {
   shs: b => shiftSeries(b),
   sgo: b => { const v = b.closest('.card').querySelector('.ac').value, id = b.dataset.id;
     if (v === 'room') return decide(b, 'ok'); if (v === 'one') return decide(b, 'no');
-    if (v === 'time') return shiftSeries(b); if (v === 'from') return cancelSeries({dataset: {id, mode: 'from'}}); },
+    if (v === 'time') return shiftSeries(b); if (v === 'from') return cancelSeries({dataset: {id, mode: 'from'}, note: b.closest('.card').querySelector('.n')?.value.trim()}); },
   sub: b => { S.sub = b.dataset.s; adminView(); },
   tab: b => { S.tab = b.dataset.t; S.edit = null; shell(); },
   em: b => { S.edit = S.mine[b.dataset.id]; S.editInit = 0; S.tab = 'new'; shell(); },
