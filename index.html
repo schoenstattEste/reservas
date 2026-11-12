@@ -81,6 +81,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UGXL0ookgPQXW5guuHMwbA_a6qi_ECZ';
 
 /* ============ 2. TEXTOS (se pueden cambiar sin riesgo) ============ */
 const TITLE = 'Reserva de salas y recursos';
+const MAP_URL = 'mapa-cse.png'; // croquis de la propiedad, subido junto a index.html (el espacio del nombre va como %20). Vacío = sin mapa
 const LOGO_URL = 'logo.png'; // archivo subido junto a index.html, o una dirección completa (https://...). Vacío = sin logo
 const DESCRIPTION = 'Solicite aquí las salas y recursos de la Casa Sede Este. Su solicitud será revisada por la administración.'; // vacío = no se muestra
 const SENDER_NAME = 'Reservas Casa Sede Este'; // nombre con que llegan los correos (el mismo del remitente en Supabase)
@@ -251,7 +252,9 @@ function newView() {
   <label>Hora de fin<input type="time" id="t2" required value="${ee.slice(11, 16)}"></label><label>Asistentes<input type="number" id="at" min="1" value="${ed?.attendees ?? ''}"></label></div>
   <label>Nombre del evento<input id="pp" required maxlength="${EVMAX}" placeholder="ej. Reunión grupo G-66" autocomplete="off" value="${esc(ed?.purpose)}">
   <small id="pcnt" class="muted" style="display:block;text-align:right;font-size:.7rem;margin-top:2px"></small></label>
-  <h3 class="hd">Salas y recursos <span id="navlink"></span></h3><div id="av" class="muted">Elija fecha y horario para ver qué está disponible.</div><br>
+  <h3 class="hd">Salas y recursos <button type="button" class="lnk" id="mapbtn" aria-expanded="false" aria-controls="mapbox" hidden>Ver mapa de la propiedad</button><span id="navlink"></span></h3>
+  <div id="mapbox" hidden><a href="${MAP_URL}" target="_blank" rel="noopener"><img src="${MAP_URL}" alt="Mapa de la propiedad con la ubicación de las casas y salas" style="display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:10px"></a><small class="muted">Toque el mapa para verlo en grande.</small></div>
+  <div id="av" class="muted">Elija fecha y horario para ver qué está disponible.</div><br>
   <div class="sumbar" id="sumbar" hidden><div class="sum"><small>Seleccionado</small><b id="sumtxt">Aún no ha elegido ninguna</b><span id="summsg" class="muted">Elija una o más salas o recursos.</span></div>
   <div><button id="go">${ed ? 'Guardar cambios' : 'Continuar'}</button>${ed ? ' <button type="button" class="sec" data-act="tab" data-t="mine">Volver sin guardar</button>' : ''}</div></div></form>`;
   S.showNA = false; S.av = null;
@@ -262,6 +265,10 @@ function newView() {
     pp.setCustomValidity(n < EVMIN ? 'Escriba al menos ' + EVMIN + ' caracteres para el nombre del evento (lleva ' + n + ').' : n > EVMAX ? 'El nombre del evento admite máximo ' + EVMAX + ' caracteres.' : '');
   };
   pp.oninput = nameCheck; nameCheck();
+  if (MAP_URL) { // el botón del mapa solo aparece si la imagen existe
+    const im = new Image(); im.onload = () => { const mb = $('#mapbtn'); if (mb) mb.hidden = false; }; im.src = MAP_URL;
+    $('#mapbtn').onclick = () => { const bx = $('#mapbox'); bx.hidden = !bx.hidden; $('#mapbtn').textContent = bx.hidden ? 'Ver mapa de la propiedad' : 'Ocultar mapa'; $('#mapbtn').setAttribute('aria-expanded', String(!bx.hidden)); };
+  }
   $('#at').oninput = () => S.av && renderAvail(); // la capacidad se compara con los asistentes
   ['dt','t1','t2'].forEach(i => $('#' + i).onchange = avail);
   $('#f').onsubmit = submit;
@@ -350,7 +357,7 @@ function renderAvail() {
   const known = new Set(blds.map(x => x.id));
   const groups = [
     ...blds.map(bd => ({bd, title: bd.name, sub: '', items: rooms.filter(([s]) => s.building_id === bd.id).sort(byName)})),
-    {bd: null, title: blds.length ? 'Otras salas' : 'Salas', sub: '', items: rooms.filter(([s]) => !known.has(s.building_id)).sort(byName)},
+    {bd: null, title: blds.length ? 'Otras áreas' : 'Salas', sub: '', items: rooms.filter(([s]) => !known.has(s.building_id)).sort(byName)},
     {bd: null, title: 'Recursos', sub: 'Agréguelos a su reserva', items: res}];
 
   let html = '';
