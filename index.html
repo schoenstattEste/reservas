@@ -56,6 +56,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}dialog h3{margin:0 0 12px;font-size:
 .tile.inc .bdg{display:none}
 .cw{color:var(--warn);font-size:.74rem;line-height:1.25}.cwm{color:var(--warn)}.tile a.mail{position:relative;z-index:3;color:var(--ac);word-break:break-all}
 button.lnk{background:none;border:0;color:var(--ac);text-decoration:underline;padding:0;font:inherit;font-size:.88rem}
+#pie{max-width:880px;margin:8px auto 28px;padding:0 14px;text-align:center;font-size:.78rem;line-height:1.5;color:var(--mut)}#pie a{color:inherit}
 .sumbar[hidden]{display:none}.sumbar{position:sticky;bottom:0;z-index:2;display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px -14px -14px;padding:12px 14px;background:var(--card);border-top:1px solid var(--line);box-shadow:0 -6px 16px rgba(0,0,0,.08);border-radius:0 0 8px 8px}
 .sum{flex:1;min-width:200px;display:flex;flex-direction:column}.sum b{font-size:1.02rem}.sum .ok{color:var(--ok)}.sum .wait{color:var(--warn)}
 /* Pantalla de entrada */
@@ -73,6 +74,7 @@ button.lnk{background:none;border:0;color:var(--ac);text-decoration:underline;pa
 </head>
 <body>
 <main id="app">Cargando…</main>
+<footer id="pie"></footer>
 <div id="msg" role="status" hidden></div>
 <script>
 /* ============ 1. CONFIGURACIÓN (lo único que debe editar para empezar) ============ */
@@ -81,10 +83,11 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UGXL0ookgPQXW5guuHMwbA_a6qi_ECZ';
 
 /* ============ 2. TEXTOS (se pueden cambiar sin riesgo) ============ */
 const TITLE = 'Reserva de salas y recursos';
-const MAP_URL = 'mapa-cse.png'; // croquis de la propiedad, subido junto a index.html (el espacio del nombre va como %20). Vacío = sin mapa
+const MAP_URL = 'mapa-cse.png'; // croquis de la propiedad, subido junto a index.html. Vacío = sin mapa
 const LOGO_URL = 'logo.png'; // archivo subido junto a index.html, o una dirección completa (https://...). Vacío = sin logo
 const DESCRIPTION = 'Solicite aquí las salas y recursos de la Casa Sede Este. Su solicitud será revisada por la administración.'; // vacío = no se muestra
 const SENDER_NAME = 'Reservas Casa Sede Este'; // nombre con que llegan los correos (el mismo del remitente en Supabase)
+const ORG_LEGAL = 'Schoenstatt del Este'; // nombre legal de la organización para el pie de página (ajústelo si es otro)
 const HELP_EMAIL = 'reservascasasedeeste@gmail.com'; // vacío = no se muestra la línea de ayuda
 document.title = TITLE;
 if (LOGO_URL) { const ic = document.createElement('link'); ic.rel = 'icon'; ic.href = LOGO_URL; document.head.appendChild(ic); }
@@ -111,6 +114,10 @@ const EVMIN = 15, EVMAX = 50; // largo permitido del nombre del evento
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Pie de página: nombre del sistema, derechos y ayuda
+{ const y = '© 2026 ' + ORG_LEGAL + '. Todos los derechos reservados.'; // año de publicación, fijo
+  $('#pie').innerHTML = '<div>Sistema de reservas de la Casa Sede Este · ' + esc(y) + '</div>' +
+    '<div>' + (HELP_EMAIL ? '¿Dudas? Escriba a <a href="mailto:' + esc(HELP_EMAIL) + '">' + esc(HELP_EMAIL) + '</a>. ' : '') + 'Sus datos se usan solo para gestionar las reservas.</div>'; }
 const fmt = d => new Date(d).toLocaleString('es', {dateStyle:'medium', timeStyle:'short'});
 const loc = d => { const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0,16); };
 const iso = v => new Date(v).toISOString();
