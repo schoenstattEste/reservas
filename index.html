@@ -112,6 +112,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 const fmt = d => new Date(d).toLocaleString('es', {dateStyle:'medium', timeStyle:'short'});
 const loc = d => { const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0,16); };
 const iso = v => new Date(v).toISOString();
+const uuid = () => crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); });
 const err = e => { const m = e.message || ''; const k = Object.keys(ERR).find(k => m.includes(k)); return k ? ERR[k] : m; };
 /* Ventana de confirmación propia (la del navegador siempre muestra el nombre del sitio como título) */
 function ask(question, lines, okText, noText) {
@@ -572,11 +573,18 @@ async function adminView() {
   <button class="sec" data-act="ed" data-id="${s.id}">Editar</button> <button class="sec" data-act="sx" data-id="${s.id}">Eliminar</button></div>`).join('')}
   <br><button data-act="ed" data-id="new">Agregar sala o recurso</button><div id="ef"></div></div>
   <div class="card"><h2>Bloqueos por periodo</h2>
-  <div class="g"><label>Espacio<select id="bs">${S.spaces.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label>
+  <div class="g"><label>Espacio<select id="bs">${(bdl => bdl ? `<optgroup label="Edificio completo (todas sus salas)">${bdl}</optgroup>` : '')(S.buildings.filter(b => S.spaces.some(s => s.active && s.kind === 'room' && s.building_id === b.id)).sort((x, y) => x.name.localeCompare(y.name, 'es')).map(b => `<option value="b:${b.id}">${esc(b.name)} completa</option>`).join(''))}<optgroup label="Sala o recurso">${S.spaces.filter(s => s.active).sort((x, y) => x.name.localeCompare(y.name, 'es')).map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</optgroup></select></label>
   <label>Desde<input type="datetime-local" id="b1"></label><label>Hasta<input type="datetime-local" id="b2"></label>
   <label>Motivo<input id="br"></label></div><button data-act="bo">Bloquear periodo</button>
-  ${(bl.data || []).map(b => `<div class="row"><b>${esc(b.spaces?.name)}</b><small>${fmt(b.starts_at)} a ${fmt(b.ends_at)} ${esc(b.reason || '')}</small>
-  <button class="sec" data-act="bd" data-id="${b.id}">Quitar</button></div>`).join('')}</div>`;
+  ${(rows => rows.map(g => `<div class="row"><b>${esc(g.label)}</b><small>${fmt(g.b.starts_at)} a ${fmt(g.b.ends_at)} ${esc(g.b.reason || '')}</small>
+  <button class="sec" data-act="bd" data-id="${g.b.id}" data-g="${g.b.group_id || ''}">Quitar</button></div>`).join(''))((() => {
+    const seen = new Set(), out = [];
+    for (const b of bl.data || []) {
+      if (b.group_id) { if (seen.has(b.group_id)) continue; seen.add(b.group_id); out.push({b, label: (S.buildings.find(x => x.id === b.building_id)?.name || 'Edificio') + ' completa (todas sus salas)'}); }
+      else out.push({b, label: b.spaces?.name});
+    }
+    return out;
+  })())}</div>`;
 }
 
 async function decide(btn, kind) {
@@ -705,10 +713,19 @@ const acts = {
   bo: async () => {
     const s = $('#bs').value, a = $('#b1').value, b = $('#b2').value;
     if (!s || !a || !b) return msg('Complete el espacio y las fechas.', 1);
-    const {error} = await sb.from('blackouts').insert({space_id: s, starts_at: iso(a), ends_at: iso(b), reason: $('#br').value || null});
+    if (iso(b) <= iso(a)) return msg('La fecha final debe ser posterior a la inicial.', 1);
+    const reason = $('#br').value || null;
+    let rows;
+    if (s.startsWith('b:')) { // edificio completo: un bloqueo por cada sala activa, unidos por el mismo grupo
+      const bid = s.slice(2), g = uuid();
+      rows = S.spaces.filter(x => x.active && x.kind === 'room' && x.building_id === bid)
+        .map(x => ({space_id: x.id, starts_at: iso(a), ends_at: iso(b), reason, group_id: g, building_id: bid}));
+      if (!rows.length) return msg('Ese edificio no tiene salas habilitadas.', 1);
+    } else rows = [{space_id: s, starts_at: iso(a), ends_at: iso(b), reason}];
+    const {error} = await sb.from('blackouts').insert(rows);
     error ? msg(err(error), 1) : adminView();
   },
-  bd: async b => { await sb.from('blackouts').delete().eq('id', b.dataset.id); adminView(); }
+  bd: async b => { await (b.dataset.g ? sb.from('blackouts').delete().eq('group_id', b.dataset.g) : sb.from('blackouts').delete().eq('id', b.dataset.id)); adminView(); }
 };
 document.addEventListener('click', e => { const b = e.target.closest('[data-act]'); if (b) acts[b.dataset.act]?.(b); });
 </script>
