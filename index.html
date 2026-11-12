@@ -62,6 +62,7 @@ button.lnk{background:none;border:0;color:var(--ac);text-decoration:underline;pa
 .brand{text-align:center;margin-bottom:8px}.brand img{display:block;width:96px;height:96px;object-fit:contain;margin:0 auto 10px}
 .brand h1{font-size:1.6rem;line-height:1.25}.brand p{margin:8px 0 0}
 .login h3{margin:18px 0 8px}.login .wide{width:100%}
+.login .big{min-height:60px;font-size:1.1rem;font-weight:700}.login .lh{margin:20px 0 4px;font-size:1.25rem}.login .lh2{margin:6px 0 10px;text-align:center}.login [hidden]{display:none}
 .or{display:flex;align-items:center;gap:10px;color:var(--mut);margin:20px 0 4px}.or:before,.or:after{content:"";flex:1;border-top:1px solid var(--line)}
 .help{text-align:center;margin:20px 0 0;font-size:.9rem}.help a{color:var(--ac)}
 .logo-sm{width:32px;height:32px;object-fit:contain;vertical-align:middle;margin-right:8px}
@@ -162,14 +163,19 @@ const helpLine = () => HELP_EMAIL ? `<p class="help muted">¿Necesita ayuda? Esc
 
 function loginView() {
   $('#app').innerHTML = `<div class="login card">${brand()}
-  <h3>¿Tiene una cuenta de Google (Gmail)?</h3>
-  <button class="wide" data-act="google">Entrar con mi cuenta de Google</button>
+  <h3 class="lh">Entre para solicitar su reserva</h3>
+  <p class="muted lh2">Si su correo termina en @gmail.com</p>
+  <button class="wide big" data-act="google">Entrar con Google</button>
   <div class="or"><span>o</span></div>
-  <form id="lf"><h3>¿Usa otro correo (Outlook, Yahoo, institucional…)? Escríbalo aquí</h3>
-  <label>Correo electrónico<input type="email" id="em" required autocomplete="email"></label>
-  <button class="wide">Enviarme el enlace de acceso</button>
+  <button class="wide big" type="button" id="oth" aria-expanded="false" aria-controls="lf">Entrar con otro correo</button>
+  <p class="muted lh2">Hotmail, Yahoo, Outlook u otro. Le enviaremos un enlace para el ingreso.</p>
+  <form id="lf" hidden>
+  <label>Escriba su correo electrónico<input type="email" id="em" required autocomplete="email" placeholder="ejemplo@correo.com"></label>
+  <button class="wide big">Enviarme el enlace de acceso</button>
   <p class="muted"><small>Le llegará un correo de ${esc(SENDER_NAME)}. Ábralo y pulse el botón para entrar. No necesita contraseña.</small></p></form>
-  ${helpLine()}</div>`;
+  ${helpLine()}
+  <p class="help muted">Si no ve el correo de Reservas Casa Sede en el buzón, revise la carpeta de spam.</p></div>`;
+  $('#oth').onclick = () => { const f = $('#lf'); f.hidden = false; $('#oth').setAttribute('aria-expanded', 'true'); $('#em').focus(); };
   $('#lf').onsubmit = async e => {
     e.preventDefault();
     const b = e.submitter; if (b) b.disabled = true;
