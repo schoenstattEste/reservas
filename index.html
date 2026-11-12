@@ -64,6 +64,7 @@ button.lnk{background:none;border:0;color:var(--ac);text-decoration:underline;pa
 .brand h1{font-size:1.6rem;line-height:1.25}.brand p{margin:8px 0 0}
 .login h3{margin:18px 0 8px}.login .wide{width:100%}
 .login .big{min-height:60px;font-size:1.1rem;font-weight:700}.login .lh{margin:20px 0 4px;font-size:1.25rem}.login .lh2{margin:6px 0 10px;text-align:center}.login [hidden]{display:none}
+[hidden]{display:none!important}
 .or{display:flex;align-items:center;gap:10px;color:var(--mut);margin:20px 0 4px}.or:before,.or:after{content:"";flex:1;border-top:1px solid var(--line)}
 .help{text-align:center;margin:20px 0 0;font-size:.9rem}.help a{color:var(--ac)}
 .logo-sm{width:32px;height:32px;object-fit:contain;vertical-align:middle;margin-right:8px}
@@ -245,7 +246,7 @@ function newView() {
   ${S.admin && !S.root && !ed ? '<p class="muted"><small>Como administrador, esta reserva queda aprobada de inmediato, en cualquier sala o recurso.</small></p>' : ''}
   <div class="g"><label><span id="nml">Nombre completo</span><input id="nm" required value="${esc(p.full_name)}"></label>
   <label>Teléfono<input id="ph" required value="${esc(p.phone)}"></label></div>
-  <label id="eml" hidden>Correo de la persona (opcional, para enviarle la confirmación)<input type="email" id="emx" autocomplete="off" placeholder="ejemplo@correo.com"></label>
+  ${S.root && !ed ? '<label id="eml" hidden>Correo de la persona (opcional, para enviarle la confirmación)<input type="email" id="emx" autocomplete="off" placeholder="ejemplo@correo.com"></label>' : ''}
   <div class="g"><label>Fecha<input type="date" id="dt" required min="${loc(new Date()).slice(0, 10)}" ${S.admin ? '' : `max="${loc(new Date(Date.now() + MAXDAYS * 864e5)).slice(0, 10)}"`} value="${sd.slice(0, 10)}"></label><label>Hora de inicio<input type="time" id="t1" required value="${sd.slice(11, 16)}"></label>
   <label>Hora de fin<input type="time" id="t2" required value="${ee.slice(11, 16)}"></label><label>Asistentes<input type="number" id="at" min="1" value="${ed?.attendees ?? ''}"></label></div>
   <label>Nombre del evento<input id="pp" required maxlength="${EVMAX}" placeholder="ej. Reunión grupo G-66" autocomplete="off" value="${esc(ed?.purpose)}">
@@ -413,7 +414,7 @@ function syncBld(from) {
 // Administración: la reserva se crea aprobada (propia o a nombre de otra persona), se registra en Calendar y se avisa por correo
 async function adminSubmit({a, b, ids, bld, chosen}) {
   const third = !!$('#ob')?.checked;
-  const name = $('#nm').value.trim(), phone = $('#ph').value.trim(), mail = $('#emx').value.trim();
+  const name = $('#nm').value.trim(), phone = $('#ph').value.trim(), mail = $('#emx')?.value.trim() || '';
   if (third && (!name || !phone)) return msg(ERR.contact_incomplete, 1);
   const ok = await ask('¿Desea crear la reserva aprobada?', [...(third ? ['A nombre de: ' + name + ' (' + phone + (mail ? ', ' + mail : '') + ')'] : []),
     ...(bld ? [bld.name + ' completa'] : []), ...chosen.map(spaceLine), ...when(a, b), 'Queda aprobada de inmediato.'], 'Crear reserva', 'Volver');
