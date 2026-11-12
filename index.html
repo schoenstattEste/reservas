@@ -35,6 +35,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}dialog h3{margin:0 0 12px;font-size:
 #msg{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:92%;padding:10px 16px;border-radius:8px;color:#fff;z-index:9}
 #msg.ok{background:var(--ok)}#msg.bad{background:var(--bad)}
 /* Lista de salas y recursos en la solicitud: tarjetas agrupadas */
+.obh{display:flex;align-items:center;gap:8px;font-size:1.05rem;margin-bottom:2px}.obh input{width:22px;height:22px;flex:none;margin:0}.obn{margin:0 0 10px}
 .hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.hd #navlink{font-weight:400;font-size:.88rem}
 .sec-h{display:flex;align-items:baseline;gap:8px;margin:20px 0 8px}.sec-h h4{margin:0;font-size:1.02rem;color:var(--ac)}
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
@@ -88,7 +89,7 @@ if (LOGO_URL) { const ic = document.createElement('link'); ic.rel = 'icon'; ic.h
 const LBL = {available:'Disponible', booked:'No disponible', blackout:'No disponible', calendar_busy:'No disponible', inactive:'Deshabilitado', expired:'Sin respuesta',
   pending:'Pendiente', approved:'Aprobada', rejected:'Rechazada', cancelled:'Cancelada'};
 const ERR = {invalid_time:'El horario no es válido o ya pasó.', no_spaces:'Elija al menos una sala o recurso.',
-  profile_incomplete:'Complete su nombre y teléfono.', too_many_pending:'Tiene demasiadas solicitudes pendientes.',
+  profile_incomplete:'Complete su nombre y teléfono.', contact_incomplete:'Escriba el nombre y el teléfono de la persona solicitante.', bad_email:'El correo de la persona no parece válido.', not_admin:'Solo la administración puede hacer esto.', not_root:'Solo la cuenta principal de la administración puede crear reservas a nombre de otra persona.', too_many_pending:'Tiene demasiadas solicitudes pendientes.',
   unavailable:'Alguno de los espacios ya no está disponible en ese horario.', not_authenticated:'Inicie sesión.',
   exclusion:'Ese horario choca con otra reserva aprobada.',
   not_cancellable:'Esta reserva ya no se puede cancelar.', not_editable:'Esta reserva ya no se puede editar.', already_past:'Esa reserva ya pasó.', not_found:'No se encontró la reserva.',
@@ -212,10 +213,10 @@ async function loadBase() {
     sb.from('spaces').select('*, space_features(feature_id, detail, features(name))').order('name'),
     sb.from('features').select('*').order('name'),
     sb.from('profiles').select('*').eq('user_id', S.user.id).maybeSingle(),
-    sb.from('admins').select('user_id').eq('user_id', S.user.id).maybeSingle(),
+    sb.from('admins').select('user_id, can_create_for_others').eq('user_id', S.user.id).maybeSingle(),
     sb.from('buildings').select('*').order('name')]);
   S.buildings = bd.data || [];
-  S.spaces = sp.data || []; S.features = ft.data || []; S.profile = pf.data; S.admin = !!ad.data;
+  S.spaces = sp.data || []; S.features = ft.data || []; S.profile = pf.data; S.admin = !!ad.data; S.root = !!ad.data?.can_create_for_others;
 }
 
 async function start(session) {
@@ -238,9 +239,13 @@ function shell() {
 function newView() {
   const p = S.profile || {}, ed = S.edit, sd = ed ? loc(ed.starts_at) : '', ee = ed ? loc(ed.ends_at) : '';
   $('#view').innerHTML = `<form id="f" class="card"><h2>${ed ? (ed.status === 'approved' ? 'Editar reserva' : 'Editar solicitud') : 'Nueva solicitud'}</h2>
-  <div class="g"><label>Nombre completo<input id="nm" required value="${esc(p.full_name)}"></label>
+  ${S.root && !ed ? `<label class="obh"><input type="checkbox" id="ob"> <b>Crear en nombre de otra persona</b></label>
+  <p class="muted obn" id="obn"><small>Como administrador, esta reserva queda aprobada de inmediato, en cualquier sala o recurso.</small></p>` : ''}
+  ${S.admin && !S.root && !ed ? '<p class="muted"><small>Como administrador, esta reserva queda aprobada de inmediato, en cualquier sala o recurso.</small></p>' : ''}
+  <div class="g"><label><span id="nml">Nombre completo</span><input id="nm" required value="${esc(p.full_name)}"></label>
   <label>Teléfono<input id="ph" required value="${esc(p.phone)}"></label></div>
-  <div class="g"><label>Fecha<input type="date" id="dt" required min="${loc(new Date()).slice(0, 10)}" max="${loc(new Date(Date.now() + MAXDAYS * 864e5)).slice(0, 10)}" value="${sd.slice(0, 10)}"></label><label>Hora de inicio<input type="time" id="t1" required value="${sd.slice(11, 16)}"></label>
+  <label id="eml" hidden>Correo de la persona (opcional, para enviarle la confirmación)<input type="email" id="emx" autocomplete="off" placeholder="ejemplo@correo.com"></label>
+  <div class="g"><label>Fecha<input type="date" id="dt" required min="${loc(new Date()).slice(0, 10)}" ${S.admin ? '' : `max="${loc(new Date(Date.now() + MAXDAYS * 864e5)).slice(0, 10)}"`} value="${sd.slice(0, 10)}"></label><label>Hora de inicio<input type="time" id="t1" required value="${sd.slice(11, 16)}"></label>
   <label>Hora de fin<input type="time" id="t2" required value="${ee.slice(11, 16)}"></label><label>Asistentes<input type="number" id="at" min="1" value="${ed?.attendees ?? ''}"></label></div>
   <label>Nombre del evento<input id="pp" required maxlength="${EVMAX}" placeholder="ej. Reunión grupo G-66" autocomplete="off" value="${esc(ed?.purpose)}">
   <small id="pcnt" class="muted" style="display:block;text-align:right;font-size:.7rem;margin-top:2px"></small></label>
@@ -258,6 +263,13 @@ function newView() {
   $('#at').oninput = () => S.av && renderAvail(); // la capacidad se compara con los asistentes
   ['dt','t1','t2'].forEach(i => $('#' + i).onchange = avail);
   $('#f').onsubmit = submit;
+  if ($('#ob')) $('#ob').onchange = () => {
+    const on = $('#ob').checked;
+    $('#nm').value = on ? '' : (S.profile?.full_name || ''); $('#ph').value = on ? '' : (S.profile?.phone || ''); $('#emx').value = '';
+    $('#eml').hidden = !on; $('#nml').textContent = on ? 'Nombre de la persona solicitante' : 'Nombre completo';
+    $('#obn').firstChild.textContent = on ? 'La reserva queda aprobada de inmediato y la confirmación se envía a la persona (si escribe su correo). Usted la verá en "Mis reservas".' : 'Como administrador, esta reserva queda aprobada de inmediato, en cualquier sala o recurso.';
+    if (on) $('#nm').focus();
+  };
   if (ed) avail();
 }
 function range() {
@@ -397,13 +409,36 @@ function syncBld(from) {
     x.closest('.tile').classList.toggle('inc', inc);
   });
 }
+// Administración: la reserva se crea aprobada (propia o a nombre de otra persona), se registra en Calendar y se avisa por correo
+async function adminSubmit({a, b, ids, bld, chosen}) {
+  const third = !!$('#ob')?.checked;
+  const name = $('#nm').value.trim(), phone = $('#ph').value.trim(), mail = $('#emx').value.trim();
+  if (third && (!name || !phone)) return msg(ERR.contact_incomplete, 1);
+  const ok = await ask('¿Desea crear la reserva aprobada?', [...(third ? ['A nombre de: ' + name + ' (' + phone + (mail ? ', ' + mail : '') + ')'] : []),
+    ...(bld ? [bld.name + ' completa'] : []), ...chosen.map(spaceLine), ...when(a, b), 'Queda aprobada de inmediato.'], 'Crear reserva', 'Volver');
+  if (!ok) return;
+  if (!third) { // reserva propia: se actualiza el perfil como siempre
+    const pf = {user_id: S.user.id, email: S.user.email, full_name: name, phone, updated_at: new Date().toISOString()};
+    const u = await sb.from('profiles').upsert(pf); if (u.error) return msg(err(u.error), 1);
+    S.profile = pf;
+  }
+  const r = await sb.rpc('admin_create_reservation', {p_purpose: $('#pp').value.trim(), p_attendees: +$('#at').value || null, p_start: a, p_end: b,
+    p_space_ids: ids, p_building: bld?.id ?? null, p_name: third ? name : null, p_phone: third ? phone : null, p_email: third ? mail : null});
+  if (r.error) return msg(err(r.error), 1);
+  const f = await sb.functions.invoke('sync-calendar', {body: {reservation_id: r.data}});
+  let mailOk = true;
+  { const n = await sb.functions.invoke('notify', {body: {reservation_id: r.data, event: 'decision'}}); mailOk = !n.error; }
+  msg('Reserva creada y aprobada.' + (f.error ? ' Google Calendar no se actualizó; vuelva a guardarla desde Administración para reintentar.' : ' Quedó registrada en el calendario.')
+    + (third && !mail ? '' : mailOk ? ' Se envió la confirmación por correo.' : ' No se pudo enviar el correo.'), !!f.error || !mailOk);
+  S.edit = null; S.tab = 'mine'; shell();
+}
 async function submit(e) {
   e.preventDefault();
   const [a, b] = range();
   if (!a) return msg('Revise la fecha y las horas.', 1);
   const evn = $('#pp').value.trim().length;
   if (evn < EVMIN || evn > EVMAX) return msg('El nombre del evento debe tener entre ' + EVMIN + ' y ' + EVMAX + ' caracteres.', 1);
-  if (new Date(a) > Date.now() + MAXDAYS * 864e5) return msg(ERR.too_far, 1);
+  if (!S.admin && new Date(a) > Date.now() + MAXDAYS * 864e5) return msg(ERR.too_far, 1);
   const ids = [...document.querySelectorAll('[name=sp]:checked')].map(x => x.value);
   const bld = S.buildings.find(x => x.id === document.querySelector('[name=bld]:checked')?.value) || null;
   if (!ids.length && !bld) return msg(ERR.no_spaces, 1);
@@ -412,6 +447,7 @@ async function submit(e) {
   const cal = await calendarBusy(a, b, ed?.id); // revisión final por si alguien reservó mientras tanto
   if (cal && [...ids, ...rooms.map(s => s.id), ...(bld ? [bld.id] : [])].some(i => cal[i])) return msg('Alguno de los espacios ya tiene una reserva en ese horario. Vuelva a elegir.', 1);
   const chosen = S.spaces.filter(s => ids.includes(s.id));
+  if (S.admin && !ed) return adminSubmit({a, b, ids, bld, chosen});
   const auto = !bld && chosen.every(s => s.requires_approval === false);
   let q, okTxt, extra = [];
   if (ed) { q = editAppr ? '¿Desea guardar los cambios de la reserva?' : '¿Desea guardar los cambios de la solicitud de reserva?'; okTxt = 'Guardar cambios'; }
@@ -476,6 +512,7 @@ async function mineView() {
   const actions = r => {
     const cancel = '<button class="sec" data-act="cx" data-id="' + r.id + '">Cancelar reserva</button>';
     if (r.whole_building_id) return '<div>' + cancel + '</div><small class="muted">' + (r.status === 'pending' ? 'Las solicitudes de edificio completo no se editan: cancele y haga una nueva, o comuníquese con la administración.' : 'Para cambiar esta reserva, comuníquese con la administración o cancélela.') + '</small>';
+    if (r.created_by_admin) return '<div>' + cancel + '</div><small class="muted">Creada por la administración. Para cambiarla, use la pestaña Administración.</small>';
     if (r.status === 'pending') return '<div><button data-act="em" data-id="' + r.id + '">Editar solicitud</button> ' + cancel + '</div>';
     const auto = (r.reservation_items || []).every(i => i.spaces?.requires_approval === false);
     if (new Date(r.starts_at) - Date.now() < 24 * 36e5) return '<div>' + cancel + '</div><small class="muted">Faltan menos de 24 horas: solo puede cancelar.</small>';
@@ -484,6 +521,7 @@ async function mineView() {
   };
   const card = r => `<div class="card"><span class="tag ${r.status}">${LBL[r.status]}</span>
   <h3>${esc(names(r))}</h3><div>${rango(r)}</div>
+  ${r.created_by_admin ? '<small class="muted">Creada por la administración' + (r.on_behalf ? ' a nombre de ' + esc(r.requester_name) + ' (' + esc(r.requester_phone || '') + ')' : '') + '.</small><br>' : ''}
   ${r.was_modified ? '<small>La administración ajustó el horario o los datos solicitados.</small><br>' : ''}
   ${r.admin_note ? '<small>Nota: ' + esc(r.admin_note) + '</small>' : ''}
   ${['pending', 'approved'].includes(r.status) && new Date(r.ends_at) > new Date() ? actions(r) : ''}</div>`;
@@ -513,6 +551,7 @@ async function adminView() {
   S.res = Object.fromEntries(list.map(r => [r.id, r]));
   const rc = r => `<div class="card" data-id="${r.id}"><span class="tag ${r.status}">${LBL[r.status]}</span>
   <b>${esc(r.requester_name)}</b> <small>${esc(r.requester_email)} · ${esc(r.requester_phone || '')}</small>
+  ${r.created_by_admin ? '<div><small class="muted">Creada por la administración' + (r.created_by_email ? ' (' + esc(r.created_by_email) + ')' : '') + (r.on_behalf ? ' a nombre de ' + esc(r.requester_name) : '') + '.</small></div>' : ''}
   <div>${esc(names(r))} <small>· ${r.attendees || '?'} personas</small></div>${r.auto_approved ? '<small class="muted">Aprobada automáticamente (sin intervención de la administración).</small>' : ''}${released(r).length ? '<div><small class="muted">Salas liberadas del edificio: ' + esc(released(r).join(', ')) + '</small></div>' : ''}${r.whole_building_id ? '<div><small class="muted">Edificio completo: para liberar salas, desmárquelas en "Cambiar sala o recurso" y pulse ' + (r.status === 'pending' ? 'Aprobar' : 'Guardar cambios') + '.</small></div>' : ''}<p>${esc(r.purpose || '')}</p>
   <div class="g"><label>Inicio<input type="datetime-local" class="s" value="${loc(r.starts_at)}"></label>
   <label>Fin<input type="datetime-local" class="e" value="${loc(r.ends_at)}"></label>
