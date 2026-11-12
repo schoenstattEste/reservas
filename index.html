@@ -523,7 +523,7 @@ async function seriesSubmit({a, b, ids, bld, chosen, third, name, phone, mail}) 
     ...(bld ? [bld.name + ' completa'] : []), ...chosen.map(spaceLine), sched,
     'Se crearán ' + good.length + ' de ' + dates.length + ' fechas; quedan aprobadas de inmediato.',
     ...(unknown ? ['No se pudo revisar Google Calendar en ' + unknown + ' fecha(s); se revisan solo las reservas del sistema.'] : []),
-    ...dates.map((d, i) => st[i] === 'ok' ? 'Se crea: ' + diaLargo(d.s) : 'Se omite: ' + diaLargo(d.s) + ' (' + (MOTIVO[st[i]] || st[i]) + ')')];
+    ...dates.map((d, i) => (st[i] === 'ok' ? '✓ Disponible - ' : '✗ Ocupado - ') + diaLargo(d.s))];
   if (!(await ask('¿Desea crear la serie de reservas?', lines, 'Crear serie', 'Volver'))) return;
   busyText('Creando la serie…');
   if (!third) { // serie propia: se actualiza el perfil como siempre
@@ -542,6 +542,65 @@ async function seriesSubmit({a, b, ids, bld, chosen, third, name, phone, mail}) 
   const res = ['Se crearon ' + made.length + ' reservas aprobadas.', ...(skipped.length ? ['No se crearon (' + skipped.length + '): ' + skipped.join('; ') + '.'] : []),
     ...(bad ? ['Google Calendar no se pudo actualizar en ' + bad + ' fecha(s). Ábralas en Administración y pulse "Guardar cambios" para reintentar.'] : [])];
   if (skipped.length || bad) await tell('Serie creada', res); else msg(res[0] + ' Quedaron registradas en el calendario.');
+}
+// Cuadro para elegir una nueva hora de inicio y de fin
+function askTimes(title, lines, h1, h2) {
+  return new Promise(res => {
+    const d = document.createElement('dialog');
+    d.innerHTML = `<form method="dialog"><h3>${esc(title)}</h3><div class="dl">${lines.map(l => `<div>${esc(l)}</div>`).join('')}</div>
+      <div class="g"><label>Hora de inicio<input type="time" id="nh1" required value="${h1}"></label><label>Hora de fin<input type="time" id="nh2" required value="${h2}"></label></div>
+      <p id="nhe" class="bad" style="margin:6px 0" hidden></p>
+      <div class="da"><button value="no" class="sec" formnovalidate>Volver</button><button value="ok">Continuar</button></div></form>`;
+    d.addEventListener('close', () => { res(d.returnValue === 'ok' ? [d.querySelector('#nh1').value, d.querySelector('#nh2').value] : null); d.remove(); });
+    d.querySelector('form').addEventListener('submit', e => {
+      const ok = e.submitter?.value !== 'ok' || d.querySelector('#nh2').value > d.querySelector('#nh1').value;
+      if (!ok) { e.preventDefault(); const m = d.querySelector('#nhe'); m.textContent = 'La hora de fin debe ser posterior a la de inicio.'; m.hidden = false; }
+    });
+    const wasBusy = S.busy; if (wasBusy) $('#busy').hidden = true;
+    d.addEventListener('close', () => { if (wasBusy && S.busy) $('#busy').hidden = false; });
+    document.body.appendChild(d); d.showModal();
+  });
+}
+const hhmm = x => { const d = new Date(x); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+// Cambiar la hora de esta fecha y de las siguientes de la serie
+async function shiftSeries(btn) {
+  const r0 = S.res[btn.dataset.id]; if (!r0?.series_id) return;
+  const list = Object.values(S.res).filter(x => x.series_id === r0.series_id && new Date(x.starts_at) >= new Date(r0.starts_at)).sort((x, y) => new Date(x.starts_at) - new Date(y.starts_at));
+  const t = await askTimes('Cambiar la hora desde esta fecha', ['Se aplica a ' + diaLargo(r0.starts_at) + ' y a las ' + (list.length - 1) + ' fecha(s) siguientes de la serie.', 'Horario actual: ' + horaTxt(r0.starts_at, r0.ends_at) + '.'], hhmm(r0.starts_at), hhmm(r0.ends_at));
+  if (!t) return;
+  const nd = list.map(x => { const d = new Date(x.starts_at), ds = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    return {r: x, s: new Date(ds + 'T' + t[0]).toISOString(), e: new Date(ds + 'T' + t[1]).toISOString()}; });
+  busyText('Revisando las fechas…');
+  const ids = nd.map(x => x.r.id);
+  const pr = await sb.rpc('admin_shift_series', {p_ids: ids, p_starts: nd.map(x => x.s), p_ends: nd.map(x => x.e), p_dry: true});
+  if (pr.error) return msg(err(pr.error), 1);
+  const st = pr.data.status.slice(); let unknown = 0;
+  for (let i = 0; i < nd.length; i += 5) {
+    busyText('Revisando Google Calendar… ' + Math.min(i + 5, nd.length) + ' de ' + nd.length);
+    await Promise.all(nd.slice(i, i + 5).map(async (x, k) => {
+      if (st[i + k] !== 'ok') return;
+      const cal = await calendarBusy(x.s, x.e, x.r.id);
+      const sp = (x.r.reservation_items || []).map(y => y.space_id); const bid = x.r.whole_building_id;
+      if (cal === null) unknown++; else if ([...sp, ...(bid ? [bid] : [])].some(y => cal[y])) st[i + k] = 'calendar';
+    }));
+  }
+  const good = nd.filter((_, i) => st[i] === 'ok');
+  if (!good.length) return msg('En ninguna de esas fechas está libre el nuevo horario. No se cambió nada.', 1);
+  const lines = ['Nuevo horario: ' + horaTxt(nd[0].s, nd[0].e) + '.', 'Se cambian ' + good.length + ' de ' + nd.length + ' fechas; las que choquen conservan su horario actual.',
+    ...(unknown ? ['No se pudo revisar Google Calendar en ' + unknown + ' fecha(s); se revisan solo las reservas del sistema.'] : []),
+    ...nd.map((x, i) => st[i] === 'ok' ? '✓ Disponible - ' + diaLargo(x.s) + ' (pasa a ' + horaTxt(x.s, x.e) + ')' : '✗ Ocupado - ' + diaLargo(x.s) + ' (conserva ' + horaTxt(x.r.starts_at, x.r.ends_at) + ')')];
+  if (!(await ask('¿Desea cambiar el horario?', lines, 'Cambiar horario', 'Volver'))) return;
+  busyText('Cambiando el horario…');
+  const r = await sb.rpc('admin_shift_series', {p_ids: good.map(x => x.r.id), p_starts: good.map(x => x.s), p_ends: good.map(x => x.e), p_dry: false});
+  if (r.error) return msg(err(r.error), 1);
+  const moved = r.data.moved || [];
+  const kept = [...nd.filter((_, i) => st[i] !== 'ok').map(x => diaLargo(x.s)), ...(r.data.skipped || []).map(x => diaLargo(x.start))];
+  const bad = await syncMany(moved.map(x => x.id), 'Actualizando el calendario');
+  if (moved.length) { busyText('Enviando el aviso por correo…'); sb.functions.invoke('notify', {body: {reservation_id: moved[0].id, event: 'series', kind: 'changed', schedule: 'Nuevo horario: ' + horaTxt(nd[0].s, nd[0].e), dates: moved.map(x => diaLargo(x.start)), skipped: kept}}).catch(() => {}); }
+  const res = ['Se cambió el horario en ' + moved.length + ' fecha(s).', ...(kept.length ? ['Conservan su horario anterior (' + kept.length + '): ' + kept.join('; ') + '.'] : []),
+    ...(bad ? ['Google Calendar no se pudo actualizar en ' + bad + ' fecha(s). Ábralas y pulse "Guardar cambios" para reintentar.'] : [])];
+  adminView();
+  if (kept.length || bad) await tell('Horario cambiado', res); else msg(res[0] + ' El calendario quedó actualizado.');
 }
 // Cancelar una serie completa, o esta fecha y las siguientes
 async function cancelSeries(btn) {
@@ -718,7 +777,7 @@ async function adminView() {
   <label>Nota para la persona<input class="n" value="${esc(r.admin_note)}"></label></div>
   ${spacePicker(r)}
   ${r.status === 'pending' ? '<button data-act="ok">Aprobar</button> <button class="sec" data-act="no">Rechazar</button>'
-    : '<button data-act="ok">Guardar cambios</button> <button class="sec" data-act="no">' + (r.series_id ? 'Cancelar esta fecha' : 'Cancelar reserva') + '</button>' + (r.series_id ? ' <button class="sec" data-act="cxs" data-mode="from" data-id="' + r.id + '">Cancelar esta y las siguientes</button>' : '')}</div></details>`;
+    : '<button data-act="ok">Guardar cambios</button> <button class="sec" data-act="no">' + (r.series_id ? 'Cancelar esta fecha' : 'Cancelar reserva') + '</button>' + (r.series_id ? ' <button class="sec" data-act="shs" data-id="' + r.id + '">Cambiar hora desde esta fecha</button> <button class="sec" data-act="cxs" data-mode="from" data-id="' + r.id + '">Cancelar esta y las siguientes</button>' : '')}</div></details>`;
   // Una serie se ve como una sola línea; al abrirla aparecen sus fechas
   const sg = g => { const f = g.series[0], n = g.series.length;
     return `<details class="card rw sg" data-k="s:${f.series_id}" ${op('s:' + f.series_id)}><summary>
@@ -877,6 +936,7 @@ const acts = {
   out: () => sb.auth.signOut(),
   again: () => loginView(),
   cxs: b => cancelSeries(b),
+  shs: b => shiftSeries(b),
   sub: b => { S.sub = b.dataset.s; adminView(); },
   tab: b => { S.tab = b.dataset.t; S.edit = null; shell(); },
   em: b => { S.edit = S.mine[b.dataset.id]; S.editInit = 0; S.tab = 'new'; shell(); },
@@ -931,7 +991,7 @@ const acts = {
   },
   bd: async b => { await (b.dataset.g ? sb.from('blackouts').delete().eq('group_id', b.dataset.g) : sb.from('blackouts').delete().eq('id', b.dataset.id)); adminView(); }
 };
-const BUSYTXT = {google: 'Abriendo Google…', ok: 'Guardando…', no: 'Guardando…', cx: 'Cancelando la reserva…', sx: 'Eliminando…', bx: 'Eliminando…', bo: 'Guardando el bloqueo…', bd: 'Quitando el bloqueo…', cxs: 'Cancelando…'};
+const BUSYTXT = {google: 'Abriendo Google…', ok: 'Guardando…', no: 'Guardando…', cx: 'Cancelando la reserva…', sx: 'Eliminando…', bx: 'Eliminando…', bo: 'Guardando el bloqueo…', bd: 'Quitando el bloqueo…', cxs: 'Cancelando…', shs: 'Cambiando el horario…'};
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const f = acts[b.dataset.act], t = BUSYTXT[b.dataset.act];
