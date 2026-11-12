@@ -31,6 +31,7 @@ button.sec{background:none;color:var(--ink);border-color:var(--line)}
 .available,.approved{color:var(--ok)}.booked,.blackout,.inactive,.calendar_busy,.rejected,.cancelled{color:var(--bad)}.row.off{opacity:.6}.row.off .tag{color:var(--mut)}.pending{color:var(--warn)}.expired{color:var(--mut)}
 .chip{display:inline-block;margin-right:12px}details{margin:6px 0 12px}summary{cursor:pointer;color:var(--ac)}.pick{padding:8px 0}small,.muted{color:var(--mut)}
 dialog{font:inherit;border:1px solid var(--line);border-radius:10px;padding:20px;width:min(420px,92vw);background:var(--card);color:var(--ink)}
+button.wn{background:var(--bad);border-color:var(--bad);color:#fff}.ap[hidden]{display:none}
 dialog::backdrop{background:rgba(0,0,0,.45)}dialog h3{margin:0 0 12px;font-size:1.1rem}.dl{margin-bottom:18px;line-height:1.6;max-height:50vh;overflow:auto}.da{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 #msg{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:92%;padding:10px 16px;border-radius:8px;color:#fff;z-index:9}
 #msg.ok{background:var(--ok)}#msg.bad{background:var(--bad)}
@@ -187,9 +188,13 @@ const released = r => { const b = bOf(r), cur = new Set((r.reservation_items || 
   return b ? S.spaces.filter(s => s.active && s.kind === 'room' && s.building_id === b.id && !cur.has(s.id)).map(s => s.name) : []; };
 const spacePicker = r => {
   const cur = new Set((r.reservation_items || []).map(i => i.space_id));
-  return `<details><summary>Cambiar sala o recurso</summary><div class="pick">${S.spaces.filter(s => s.active || cur.has(s.id)).map(s =>
+  return `<details><summary>Cambiar sala o recurso</summary>${spacePickBody(r)}</details>`;
+};
+const spacePickBody = r => {
+  const cur = new Set((r.reservation_items || []).map(i => i.space_id));
+  return `<div class="pick">${S.spaces.filter(s => s.active || cur.has(s.id)).map(s =>
     `<label class="chip"><input type="checkbox" value="${s.id}" ${cur.has(s.id) ? 'checked' : ''}>${esc(s.name)}${s.capacity ? ' (' + s.capacity + ' pers.)' : ''}</label>`).join('')}</div>
-    <small class="muted">Marque lo que quedará en la reserva y pulse ${r.status === 'pending' ? 'Aprobar' : 'Guardar cambios'}. El nuevo espacio debe estar libre en ese horario.</small></details>`;
+    <small class="muted">Marque lo que quedará en la reserva y pulse ${r.status === 'pending' ? 'Aprobar' : 'Guardar cambios'}. El nuevo espacio debe estar libre en ese horario.</small>`;
 };
 const feats = s => { const f = (s.space_features || []).map(x => x.features.name + (x.detail ? ' ' + x.detail : '')).join(', '); return f ? ' · ' + esc(f) : ''; };
 
@@ -772,12 +777,15 @@ async function adminView() {
   <div><small>${esc(r.requester_email)}${r.requester_phone ? ' · ' + esc(r.requester_phone) : ''} · ${r.attendees || '?'} personas</small></div>
   ${r.created_by_admin ? '<div><small class="muted">Creada por la administración' + (r.created_by_email ? ' (' + esc(r.created_by_email) + ')' : '') + (r.on_behalf ? ' a nombre de ' + esc(r.requester_name) : '') + '.</small></div>' : ''}
   ${r.auto_approved ? '<div><small class="muted">Aprobada automáticamente (sin intervención de la administración).</small></div>' : ''}${released(r).length ? '<div><small class="muted">Salas liberadas del edificio: ' + esc(released(r).join(', ')) + '</small></div>' : ''}${r.whole_building_id ? '<div><small class="muted">Edificio completo: para liberar salas, desmárquelas en "Cambiar sala o recurso" y pulse ' + (r.status === 'pending' ? 'Aprobar' : 'Guardar cambios') + '.</small></div>' : ''}
-  <div class="g"><label>Inicio<input type="datetime-local" class="s" value="${loc(r.starts_at)}"></label>
+  ${r.series_id && r.status === 'approved' ? `<label>¿Qué desea hacer con esta fecha?<select class="ac"><option value="">Elegir una acción…</option><option value="room">Cambiar sala o recurso</option><option value="time">Cambiar hora desde esta fecha</option><option value="one">Cancelar esta fecha</option><option value="from">Cancelar esta y las siguientes</option></select></label>
+  <div class="ap" data-p="room" hidden>${spacePickBody(r)}</div>
+  <label class="ap" data-p="room one" hidden>Nota para la persona<input class="n" value="${esc(r.admin_note)}"></label>
+  <div><button class="go" data-act="sgo" data-id="${r.id}" disabled>Elegir una acción</button></div>` : `<div class="g"><label>Inicio<input type="datetime-local" class="s" value="${loc(r.starts_at)}"></label>
   <label>Fin<input type="datetime-local" class="e" value="${loc(r.ends_at)}"></label>
   <label>Nota para la persona<input class="n" value="${esc(r.admin_note)}"></label></div>
   ${spacePicker(r)}
   ${r.status === 'pending' ? '<button data-act="ok">Aprobar</button> <button class="sec" data-act="no">Rechazar</button>'
-    : '<button data-act="ok">Guardar cambios</button> <button class="sec" data-act="no">' + (r.series_id ? 'Cancelar esta fecha' : 'Cancelar reserva') + '</button>' + (r.series_id ? ' <button class="sec" data-act="shs" data-id="' + r.id + '">Cambiar hora desde esta fecha</button> <button class="sec" data-act="cxs" data-mode="from" data-id="' + r.id + '">Cancelar esta y las siguientes</button>' : '')}</div></details>`;
+    : '<button data-act="ok">Guardar cambios</button> <button class="sec" data-act="no">Cancelar reserva</button>'}`}</div></details>`;
   // Una serie se ve como una sola línea; al abrirla aparecen sus fechas
   const sg = g => { const f = g.series[0], n = g.series.length;
     return `<details class="card rw sg" data-k="s:${f.series_id}" ${op('s:' + f.series_id)}><summary>
@@ -849,10 +857,10 @@ document.addEventListener('toggle', e => {
 
 async function decide(btn, kind) {
   const card = btn.closest('.card'), id = card.dataset.id, r = S.res[id];
-  const s = iso(card.querySelector('.s').value), e = iso(card.querySelector('.e').value);
+  const s = card.querySelector('.s') ? iso(card.querySelector('.s').value) : r.starts_at, e = card.querySelector('.e') ? iso(card.querySelector('.e').value) : r.ends_at;
   let removed = [], swapped = false;
   if (kind === 'ok') {
-    const sel = [...card.querySelectorAll('details input:checked')].map(x => x.value);
+    const sel = [...card.querySelectorAll('.pick input:checked')].map(x => x.value);
     const cur = r.reservation_items.map(i => i.space_id);
     swapped = !(sel.length === cur.length && sel.every(x => cur.includes(x)));
     // Revisa Google Calendar antes de aprobar: si hay eventos en ese horario, el administrador decide
@@ -864,7 +872,7 @@ async function decide(btn, kind) {
       removed = q.data || [];
     }
   }
-  const up = {admin_note: card.querySelector('.n').value || null, decided_by: S.user.id, decided_at: new Date().toISOString()};
+  const up = {admin_note: card.querySelector('.n')?.value || null, decided_by: S.user.id, decided_at: new Date().toISOString()};
   if (kind === 'ok') {
     const changed = new Date(s) - new Date(r.starts_at) || new Date(e) - new Date(r.ends_at);
     Object.assign(up, {status: 'approved', starts_at: s, ends_at: e, was_modified: r.was_modified || !!changed || (swapped && !r.whole_building_id)});
@@ -937,6 +945,9 @@ const acts = {
   again: () => loginView(),
   cxs: b => cancelSeries(b),
   shs: b => shiftSeries(b),
+  sgo: b => { const v = b.closest('.card').querySelector('.ac').value, id = b.dataset.id;
+    if (v === 'room') return decide(b, 'ok'); if (v === 'one') return decide(b, 'no');
+    if (v === 'time') return shiftSeries(b); if (v === 'from') return cancelSeries({dataset: {id, mode: 'from'}}); },
   sub: b => { S.sub = b.dataset.s; adminView(); },
   tab: b => { S.tab = b.dataset.t; S.edit = null; shell(); },
   em: b => { S.edit = S.mine[b.dataset.id]; S.editInit = 0; S.tab = 'new'; shell(); },
@@ -991,7 +1002,14 @@ const acts = {
   },
   bd: async b => { await (b.dataset.g ? sb.from('blackouts').delete().eq('group_id', b.dataset.g) : sb.from('blackouts').delete().eq('id', b.dataset.id)); adminView(); }
 };
-const BUSYTXT = {google: 'Abriendo Google…', ok: 'Guardando…', no: 'Guardando…', cx: 'Cancelando la reserva…', sx: 'Eliminando…', bx: 'Eliminando…', bo: 'Guardando el bloqueo…', bd: 'Quitando el bloqueo…', cxs: 'Cancelando…', shs: 'Cambiando el horario…'};
+const BUSYTXT = {google: 'Abriendo Google…', ok: 'Guardando…', no: 'Guardando…', cx: 'Cancelando la reserva…', sx: 'Eliminando…', bx: 'Eliminando…', bo: 'Guardando el bloqueo…', bd: 'Quitando el bloqueo…', cxs: 'Cancelando…', sgo: 'Guardando…', shs: 'Cambiando el horario…'};
+const ACCION = {room: ['Guardar cambios', 0], time: ['Cambiar hora…', 0], one: ['Cancelar esta fecha', 1], from: ['Cancelar esta y las siguientes', 1]};
+document.addEventListener('change', e => {
+  const sel = e.target.closest?.('select.ac'); if (!sel) return;
+  const c = sel.closest('.card'), v = sel.value, go = c.querySelector('.go'), a = ACCION[v];
+  c.querySelectorAll('.ap').forEach(x => { x.hidden = !(v && x.dataset.p.split(' ').includes(v)); });
+  go.disabled = !a; go.textContent = a ? a[0] : 'Elegir una acción'; go.classList.toggle('wn', !!a && !!a[1]);
+});
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const f = acts[b.dataset.act], t = BUSYTXT[b.dataset.act];
