@@ -65,6 +65,12 @@ details.rw[open]>summary::after,details.bg[open]>summary::after{transform:rotate
 details.rw>summary:focus-visible,details.bg>summary:focus-visible{outline:3px solid var(--ac);outline-offset:2px}
 .rwl{color:var(--ink)}.rwb{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
 details.bg{padding-top:8px;padding-bottom:8px}details.bg[open]>summary{margin-bottom:6px}
+#busy{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--bg) 78%,transparent);animation:bfade .25s .3s both;cursor:progress}
+#busy .bx{display:flex;flex-direction:column;align-items:center;gap:10px;max-width:300px;padding:24px 28px;text-align:center;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.18)}
+#busy .bx b{font-size:1.05rem}#busy .bx small{color:var(--mut);line-height:1.4}
+.spin{width:44px;height:44px;border-radius:50%;border:5px solid var(--line);border-top-color:var(--ac);animation:bspin .9s linear infinite}
+@keyframes bspin{to{transform:rotate(360deg)}}@keyframes bfade{from{opacity:0}to{opacity:1}}
+@media(prefers-reduced-motion:reduce){.spin{animation-duration:2.4s}}
 .sumbar[hidden]{display:none}.sumbar{position:sticky;bottom:0;z-index:2;display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px -14px -14px;padding:12px 14px;background:var(--card);border-top:1px solid var(--line);box-shadow:0 -6px 16px rgba(0,0,0,.08);border-radius:0 0 8px 8px}
 .sum{flex:1;min-width:200px;display:flex;flex-direction:column}.sum b{font-size:1.02rem}.sum .ok{color:var(--ok)}.sum .wait{color:var(--warn)}
 /* Pantalla de entrada */
@@ -84,6 +90,7 @@ details.bg{padding-top:8px;padding-bottom:8px}details.bg[open]>summary{margin-bo
 <main id="app">Cargando…</main>
 <footer id="pie"></footer>
 <div id="msg" role="status" hidden></div>
+<div id="busy" role="status" aria-live="polite" hidden><div class="bx"><div class="spin" aria-hidden="true"></div><b id="busyt">Procesando…</b><small>Por favor espere unos segundos. No cierre la página ni vuelva a pulsar.</small></div></div>
 <script>
 /* ============ 1. CONFIGURACIÓN (lo único que debe editar para empezar) ============ */
 const SUPABASE_URL = 'https://zwypvyhxyvpkmlkwimyx.supabase.co';
@@ -138,9 +145,24 @@ function ask(question, lines, okText, noText) {
     d.innerHTML = `<form method="dialog"><h3>${esc(question)}</h3><div class="dl">${lines.map(l => `<div>${esc(l)}</div>`).join('')}</div>
       <div class="da"><button value="no" class="sec">${esc(noText || 'Volver')}</button><button value="ok">${esc(okText || 'Aceptar')}</button></div></form>`;
     d.addEventListener('close', () => { res(d.returnValue === 'ok'); d.remove(); });
+    const wasBusy = S.busy; if (wasBusy) $('#busy').hidden = true; // el indicador no tapa el cuadro de confirmación
+    d.addEventListener('close', () => { if (wasBusy && S.busy) $('#busy').hidden = false; });
     document.body.appendChild(d); d.showModal();
   });
 }
+
+// Indicador de espera: bloquea toques repetidos y muestra una animación mientras se procesa la gestión.
+// El aviso aparece con un ligero retraso (así no parpadea en acciones rápidas), pero el bloqueo es inmediato.
+const busyOn = t => { S.busy = true; $('#busyt').textContent = t; $('#busy').hidden = false; };
+const busyText = t => { if (S.busy) $('#busyt').textContent = t; };
+const busyOff = () => { S.busy = false; $('#busy').hidden = true; };
+// Envuelve una acción: ignora toques mientras otra está en curso y muestra el indicador
+const guard = (t, f) => async (...a) => {
+  a[0]?.preventDefault?.();
+  if (S.busy) return;
+  busyOn(t);
+  try { return await f(...a); } finally { busyOff(); }
+};
 const MES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 const dia = d => { d = new Date(d); return d.getDate() + ' de ' + MES[d.getMonth()] + ', ' + d.getFullYear(); };
 const hora = d => new Date(d).toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit'}).replace(/\s?([AP])M/i, (m, x) => ' ' + x.toLowerCase() + 'm');
@@ -195,11 +217,10 @@ function loginView() {
   ${helpLine()}
   <p class="help muted">Si no ve el correo de Reservas Casa Sede en el buzón, revise la carpeta de spam.</p></div>`;
   $('#oth').onclick = () => { const f = $('#lf'); f.hidden = false; $('#oth').setAttribute('aria-expanded', 'true'); $('#em').focus(); };
-  $('#lf').onsubmit = async e => {
-    e.preventDefault();
+  $('#lf').onsubmit = guard('Enviando el enlace a su correo…', async e => {
     const b = e.submitter; if (b) b.disabled = true;
     if (!(await sendLink($('#em').value.trim())) && b) b.disabled = false;
-  };
+  });
 }
 
 // Envía el enlace de acceso. Si todo sale bien, muestra la pantalla de confirmación. Devuelve false si falló.
@@ -223,7 +244,7 @@ function sentView(email) {
     if (--n > 0) b.textContent = 'Reenviar enlace (' + n + ' s)';
     else { clearInterval(t); b.textContent = 'Reenviar enlace'; b.disabled = false; }
   }, 1000);
-  b.onclick = async () => { b.disabled = true; if (!(await sendLink(email))) b.disabled = false; };
+  b.onclick = guard('Enviando el enlace a su correo…', async () => { b.disabled = true; if (!(await sendLink(email))) b.disabled = false; });
 }
 
 async function loadBase() {
@@ -286,7 +307,7 @@ function newView() {
   }
   $('#at').oninput = () => S.av && renderAvail(); // la capacidad se compara con los asistentes
   ['dt','t1','t2'].forEach(i => $('#' + i).onchange = avail);
-  $('#f').onsubmit = submit;
+  $('#f').onsubmit = guard('Verificando disponibilidad…', submit);
   if ($('#ob')) $('#ob').onchange = () => {
     const on = $('#ob').checked;
     $('#nm').value = on ? '' : (S.profile?.full_name || ''); $('#ph').value = on ? '' : (S.profile?.phone || ''); $('#emx').value = '';
@@ -441,6 +462,7 @@ async function adminSubmit({a, b, ids, bld, chosen}) {
   const ok = await ask('¿Desea crear la reserva aprobada?', [...(third ? ['A nombre de: ' + name + ' (' + phone + (mail ? ', ' + mail : '') + ')'] : []),
     ...(bld ? [bld.name + ' completa'] : []), ...chosen.map(spaceLine), ...when(a, b), 'Queda aprobada de inmediato.'], 'Crear reserva', 'Volver');
   if (!ok) return;
+  busyText('Creando la reserva…');
   if (!third) { // reserva propia: se actualiza el perfil como siempre
     const pf = {user_id: S.user.id, email: S.user.email, full_name: name, phone, updated_at: new Date().toISOString()};
     const u = await sb.from('profiles').upsert(pf); if (u.error) return msg(err(u.error), 1);
@@ -479,6 +501,7 @@ async function submit(e) {
   else { q = '¿Desea enviar la solicitud de reserva?'; okTxt = 'Enviar solicitud'; extra = [...(bld ? ['Incluye todas las salas de ' + bld.name + '.'] : []), 'Requiere aprobación de la administración.']; }
   const ok = await ask(q, [...(bld ? [bld.name + ' completa'] : []), ...chosen.map(spaceLine), ...when(a, b), ...extra], okTxt, 'Volver');
   if (!ok) return;
+  busyText(ed ? 'Guardando los cambios…' : auto ? 'Confirmando su reserva…' : 'Enviando su solicitud…');
   const pf = {user_id: S.user.id, email: S.user.email, full_name: $('#nm').value.trim(), phone: $('#ph').value.trim(), updated_at: new Date().toISOString()};
   let r = await sb.from('profiles').upsert(pf);
   if (r.error) return msg(err(r.error), 1);
@@ -579,7 +602,7 @@ async function adminView() {
   const rc = r => `<details class="card rw" data-id="${r.id}" data-k="r:${r.id}" ${op('r:' + r.id)}><summary>
   <span class="tag ${r.status}">${LBL[r.status]}</span><b>${esc(r.requester_name)}</b>
   <span class="rwl">${esc(r.purpose || 'Sin nombre de evento')}</span><span class="rwl">${esc(names(r))}</span>
-  <small class="muted">${rango(r)}</small>${r.auto_approved ? '<small class="muted">· automática</small>' : ''}</summary>
+  <small class="muted">${rango(r)}</small></summary>
   <div class="rwb">
   <div><small>${esc(r.requester_email)}${r.requester_phone ? ' · ' + esc(r.requester_phone) : ''} · ${r.attendees || '?'} personas</small></div>
   ${r.created_by_admin ? '<div><small class="muted">Creada por la administración' + (r.created_by_email ? ' (' + esc(r.created_by_email) + ')' : '') + (r.on_behalf ? ' a nombre de ' + esc(r.requester_name) : '') + '.</small></div>' : ''}
@@ -691,7 +714,7 @@ function editSpace(id) {
   <div>${S.features.map(f => `<label class="chip"><input type="checkbox" name="ft" value="${f.id}" ${have.has(f.id) ? 'checked' : ''}>${esc(f.name)}</label>`).join('')}</div>
   <label>Agregar característica nueva<input id="nf" placeholder="Ej. Pizarra"></label><button>Guardar cambios</button>${s.id ? ' <button type="button" class="sec" data-act="sx" data-id="' + s.id + '">Eliminar este espacio</button>' : ''}</form>`;
   $('#ef').scrollIntoView({block: 'nearest', behavior: 'smooth'});
-  $('#sf').onsubmit = saveSpace;
+  $('#sf').onsubmit = guard('Guardando…', saveSpace);
   if (!s.id) $('#sk').onchange = () => { $('#sr').checked = $('#sk').value === 'resource'; }; // espacio nuevo: los recursos nacen con aprobación automática
   if (!s.id) $('#sr').checked = false;
 }
@@ -702,7 +725,7 @@ function editBuilding(id) {
   <label>ID del calendario resumen de Google (opcional)<input id="bg" value="${esc(b.google_calendar_id)}"></label></div>
   <label><input type="checkbox" id="bw" ${b.allow_whole ? 'checked' : ''}>Se puede reservar el edificio completo (incluye todas sus salas; siempre requiere aprobación)</label>
   <button>Guardar</button></form>`;
-  $('#bf').onsubmit = saveBuilding;
+  $('#bf').onsubmit = guard('Guardando…', saveBuilding);
 }
 async function saveBuilding(e) {
   e.preventDefault();
@@ -785,7 +808,12 @@ const acts = {
   },
   bd: async b => { await (b.dataset.g ? sb.from('blackouts').delete().eq('group_id', b.dataset.g) : sb.from('blackouts').delete().eq('id', b.dataset.id)); adminView(); }
 };
-document.addEventListener('click', e => { const b = e.target.closest('[data-act]'); if (b) acts[b.dataset.act]?.(b); });
+const BUSYTXT = {google: 'Abriendo Google…', ok: 'Guardando…', no: 'Guardando…', cx: 'Cancelando la reserva…', sx: 'Eliminando…', bx: 'Eliminando…', bo: 'Guardando el bloqueo…', bd: 'Quitando el bloqueo…'};
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const f = acts[b.dataset.act], t = BUSYTXT[b.dataset.act];
+  if (f) (t ? guard(t, f) : f)(b);
+});
 </script>
 </body>
 </html>
