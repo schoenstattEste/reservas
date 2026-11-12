@@ -57,6 +57,14 @@ dialog::backdrop{background:rgba(0,0,0,.45)}dialog h3{margin:0 0 12px;font-size:
 .cw{color:var(--warn);font-size:.74rem;line-height:1.25}.cwm{color:var(--warn)}.tile a.mail{position:relative;z-index:3;color:var(--ac);word-break:break-all}
 button.lnk{background:none;border:0;color:var(--ac);text-decoration:underline;padding:0;font:inherit;font-size:.88rem}
 #pie{max-width:880px;margin:8px auto 28px;padding:0 14px;text-align:center;font-size:.78rem;line-height:1.5;color:var(--mut)}#pie a{color:inherit}
+.subnav{display:flex;gap:6px;margin:0 0 12px;flex-wrap:wrap}.subnav button{background:none;color:var(--ink);border:1px solid var(--line);font-size:.92rem}.subnav button.on{background:var(--ac);color:var(--acink);border-color:var(--ac)}
+details.rw>summary,details.bg>summary{list-style:none;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;cursor:pointer;padding:4px 28px 4px 0;position:relative}
+details.rw>summary::-webkit-details-marker,details.bg>summary::-webkit-details-marker{display:none}
+details.rw>summary::after,details.bg>summary::after{content:"";position:absolute;right:6px;top:11px;width:8px;height:8px;border-right:2px solid var(--mut);border-bottom:2px solid var(--mut);transform:rotate(45deg);transition:transform .15s}
+details.rw[open]>summary::after,details.bg[open]>summary::after{transform:rotate(-135deg);top:15px}
+details.rw>summary:focus-visible,details.bg>summary:focus-visible{outline:3px solid var(--ac);outline-offset:2px}
+.rwl{color:var(--ink)}.rwb{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+details.bg{padding-top:8px;padding-bottom:8px}details.bg[open]>summary{margin-bottom:6px}
 .sumbar[hidden]{display:none}.sumbar{position:sticky;bottom:0;z-index:2;display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px -14px -14px;padding:12px 14px;background:var(--card);border-top:1px solid var(--line);box-shadow:0 -6px 16px rgba(0,0,0,.08);border-radius:0 0 8px 8px}
 .sum{flex:1;min-width:200px;display:flex;flex-direction:column}.sum b{font-size:1.02rem}.sum .ok{color:var(--ok)}.sum .wait{color:var(--warn)}
 /* Pantalla de entrada */
@@ -559,40 +567,66 @@ async function mineView() {
 /* ============ 8. ADMINISTRACIÓN ============ */
 async function adminView() {
   $('#view').textContent = 'Cargando…';
+  S.open ||= new Set(); S.sub ||= 'res';
   const now = new Date().toISOString();
   const [rs, bl] = await Promise.all([
     sb.from('reservations').select('*, reservation_items(space_id, spaces(name, kind, building_id))').in('status', ['pending', 'approved']).gte('ends_at', now).order('starts_at'),
     sb.from('blackouts').select('*, spaces(name)').gte('ends_at', now).order('starts_at')]);
   const list = rs.data || [];
   S.res = Object.fromEntries(list.map(r => [r.id, r]));
-  const rc = r => `<div class="card" data-id="${r.id}"><span class="tag ${r.status}">${LBL[r.status]}</span>
-  <b>${esc(r.requester_name)}</b> <small>${esc(r.requester_email)} · ${esc(r.requester_phone || '')}</small>
+  const op = k => S.open.has(k) ? 'open' : '';
+  // Cada reserva: una línea (estado, solicitante, evento, espacios, fecha) que se expande con el detalle y las acciones
+  const rc = r => `<details class="card rw" data-id="${r.id}" data-k="r:${r.id}" ${op('r:' + r.id)}><summary>
+  <span class="tag ${r.status}">${LBL[r.status]}</span><b>${esc(r.requester_name)}</b>
+  <span class="rwl">${esc(r.purpose || 'Sin nombre de evento')}</span><span class="rwl">${esc(names(r))}</span>
+  <small class="muted">${rango(r)}</small>${r.auto_approved ? '<small class="muted">· automática</small>' : ''}</summary>
+  <div class="rwb">
+  <div><small>${esc(r.requester_email)}${r.requester_phone ? ' · ' + esc(r.requester_phone) : ''} · ${r.attendees || '?'} personas</small></div>
   ${r.created_by_admin ? '<div><small class="muted">Creada por la administración' + (r.created_by_email ? ' (' + esc(r.created_by_email) + ')' : '') + (r.on_behalf ? ' a nombre de ' + esc(r.requester_name) : '') + '.</small></div>' : ''}
-  <div>${esc(names(r))} <small>· ${r.attendees || '?'} personas</small></div>${r.auto_approved ? '<small class="muted">Aprobada automáticamente (sin intervención de la administración).</small>' : ''}${released(r).length ? '<div><small class="muted">Salas liberadas del edificio: ' + esc(released(r).join(', ')) + '</small></div>' : ''}${r.whole_building_id ? '<div><small class="muted">Edificio completo: para liberar salas, desmárquelas en "Cambiar sala o recurso" y pulse ' + (r.status === 'pending' ? 'Aprobar' : 'Guardar cambios') + '.</small></div>' : ''}<p>${esc(r.purpose || '')}</p>
+  ${r.auto_approved ? '<div><small class="muted">Aprobada automáticamente (sin intervención de la administración).</small></div>' : ''}${released(r).length ? '<div><small class="muted">Salas liberadas del edificio: ' + esc(released(r).join(', ')) + '</small></div>' : ''}${r.whole_building_id ? '<div><small class="muted">Edificio completo: para liberar salas, desmárquelas en "Cambiar sala o recurso" y pulse ' + (r.status === 'pending' ? 'Aprobar' : 'Guardar cambios') + '.</small></div>' : ''}
   <div class="g"><label>Inicio<input type="datetime-local" class="s" value="${loc(r.starts_at)}"></label>
   <label>Fin<input type="datetime-local" class="e" value="${loc(r.ends_at)}"></label>
   <label>Nota para la persona<input class="n" value="${esc(r.admin_note)}"></label></div>
   ${spacePicker(r)}
   ${r.status === 'pending' ? '<button data-act="ok">Aprobar</button> <button class="sec" data-act="no">Rechazar</button>'
-    : '<button data-act="ok">Guardar cambios</button> <button class="sec" data-act="no">Cancelar reserva</button>'}</div>`;
+    : '<button data-act="ok">Guardar cambios</button> <button class="sec" data-act="no">Cancelar reserva</button>'}</div></details>`;
   const pend = list.filter(r => r.status === 'pending'), appr = list.filter(r => r.status === 'approved');
-  $('#view').innerHTML = `<h2>Solicitudes pendientes</h2>${pend.map(rc).join('') || '<p class="muted">No hay solicitudes pendientes.</p>'}
-  <h2>Reservas aprobadas próximas</h2>${appr.map(rc).join('') || '<p class="muted">No hay reservas aprobadas próximas.</p>'}
-  <div class="card"><h2>Edificios</h2>
+
+  const sub = (k, t) => `<button data-act="sub" data-s="${k}" class="${S.sub === k ? 'on' : ''}">${t}</button>`;
+  const menu = `<nav class="subnav">${sub('res', 'Reservas' + (pend.length ? ' (' + pend.length + ' pendiente' + (pend.length > 1 ? 's' : '') + ')' : ''))}${sub('esp', 'Espacios')}${sub('blq', 'Bloqueos')}</nav>`;
+
+  let body = '';
+  if (S.sub === 'res') {
+    body = `<h2>Solicitudes pendientes${pend.length ? ' (' + pend.length + ')' : ''}</h2>${pend.map(rc).join('') || '<p class="muted">No hay solicitudes pendientes.</p>'}
+  <h2>Reservas aprobadas próximas${appr.length ? ' (' + appr.length + ')' : ''}</h2>${appr.map(rc).join('') || '<p class="muted">No hay reservas aprobadas próximas.</p>'}`;
+  } else if (S.sub === 'esp') {
+    // Un bloque plegable por edificio: primero salas y luego recursos, en orden alfabético; lo deshabilitado al final
+    const ord = (x, y) => (y.active - x.active) || ((x.kind === 'resource') - (y.kind === 'resource')) || x.name.localeCompare(y.name, 'es');
+    const spRow = s => `<div class="row ${s.active ? '' : 'off'}"><b>${esc(s.name)}</b><small>${s.kind === 'room' ? 'Sala' : 'Recurso'}${feats(s)} · ${s.requires_approval === false ? 'Aprobación automática' : 'Requiere aprobación'}</small>
+  <span class="tag ${s.active ? 'available' : 'inactive'}">${s.active ? 'Habilitado' : 'Deshabilitado'}</span>
+  <button class="sec" data-act="ed" data-id="${s.id}">Editar</button></div>`;
+    const grp = (k, title, items) => {
+      const rooms = items.filter(s => s.kind === 'room').length, res = items.length - rooms;
+      const sum = [rooms ? rooms + (rooms === 1 ? ' sala' : ' salas') : '', res ? res + (res === 1 ? ' recurso' : ' recursos') : ''].filter(Boolean).join(' · ') || 'Sin espacios';
+      return `<details class="card bg" data-k="g:${k}" ${op('g:' + k)}><summary><b>${esc(title)}</b><small class="muted">${sum}</small></summary>${[...items].sort(ord).map(spRow).join('') || '<p class="muted">Sin espacios.</p>'}</details>`;
+    };
+    const known = new Set(S.buildings.map(b => b.id));
+    const groups = [...S.buildings].sort((x, y) => x.name.localeCompare(y.name, 'es')).map(b => grp(b.id, b.name, S.spaces.filter(s => s.building_id === b.id)));
+    const loose = S.spaces.filter(s => !known.has(s.building_id));
+    if (loose.length) groups.push(grp('none', 'Otras áreas', loose));
+    body = `<div class="card"><h2>Edificios</h2>
   ${S.buildings.map(b => `<div class="row"><b>${esc(b.name)}</b><small>${b.allow_whole ? 'Se puede reservar completo' : 'No se reserva completo'} · ${S.spaces.filter(s => s.building_id === b.id).length} espacios${b.google_calendar_id ? ' · con calendario resumen' : ''}</small>
   <button class="sec" data-act="eb" data-id="${b.id}">Editar</button> <button class="sec" data-act="bx" data-id="${b.id}">Eliminar</button></div>`).join('') || '<p class="muted">Aún no hay edificios.</p>'}
   <br><button data-act="eb" data-id="new">Agregar edificio</button><div id="bef"></div></div>
-  <div class="card"><h2>Salas y recursos</h2>
-  ${S.spaces.map(s => `<div class="row"><b>${esc(s.name)}</b><small>${s.kind === 'room' ? 'Sala' : 'Recurso'}${s.building_id ? ' · ' + esc(S.buildings.find(b => b.id === s.building_id)?.name || '') : ''}${feats(s)} · ${s.requires_approval === false ? 'Aprobación automática' : 'Requiere aprobación'}</small>
-  <span class="tag ${s.active ? 'available' : 'inactive'}">${s.active ? 'Habilitado' : 'Deshabilitado'}</span>
-  <button class="sec" data-act="ed" data-id="${s.id}">Editar</button> <button class="sec" data-act="sx" data-id="${s.id}">Eliminar</button></div>`).join('')}
-  <br><button data-act="ed" data-id="new">Agregar sala o recurso</button><div id="ef"></div></div>
-  <div class="card"><h2>Bloqueos por periodo</h2>
+  <h2 class="hd">Salas y recursos <button data-act="ed" data-id="new">Agregar sala o recurso</button></h2><div id="ef"></div>
+  ${groups.join('')}`;
+  } else {
+    body = `<div class="card"><h2>Bloqueos por periodo</h2>
   <div class="g"><label>Espacio<select id="bs">${(bdl => bdl ? `<optgroup label="Edificio completo (todas sus salas)">${bdl}</optgroup>` : '')(S.buildings.filter(b => S.spaces.some(s => s.active && s.kind === 'room' && s.building_id === b.id)).sort((x, y) => x.name.localeCompare(y.name, 'es')).map(b => `<option value="b:${b.id}">${esc(b.name)} completa</option>`).join(''))}<optgroup label="Sala o recurso">${S.spaces.filter(s => s.active).sort((x, y) => x.name.localeCompare(y.name, 'es')).map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</optgroup></select></label>
   <label>Desde<input type="datetime-local" id="b1"></label><label>Hasta<input type="datetime-local" id="b2"></label>
   <label>Motivo<input id="br"></label></div><button data-act="bo">Bloquear periodo</button>
   ${(rows => rows.map(g => `<div class="row"><b>${esc(g.label)}</b><small>${fmt(g.b.starts_at)} a ${fmt(g.b.ends_at)} ${esc(g.b.reason || '')}</small>
-  <button class="sec" data-act="bd" data-id="${g.b.id}" data-g="${g.b.group_id || ''}">Quitar</button></div>`).join(''))((() => {
+  <button class="sec" data-act="bd" data-id="${g.b.id}" data-g="${g.b.group_id || ''}">Quitar</button></div>`).join('') || '<p class="muted">No hay bloqueos próximos.</p>')((() => {
     const seen = new Set(), out = [];
     for (const b of bl.data || []) {
       if (b.group_id) { if (seen.has(b.group_id)) continue; seen.add(b.group_id); out.push({b, label: (S.buildings.find(x => x.id === b.building_id)?.name || 'Edificio') + ' completa (todas sus salas)'}); }
@@ -600,7 +634,14 @@ async function adminView() {
     }
     return out;
   })())}</div>`;
+  }
+  $('#view').innerHTML = menu + body;
 }
+// Recuerda qué filas y bloques están abiertos para no cerrarlos al refrescar la lista
+document.addEventListener('toggle', e => {
+  const d = e.target;
+  if (d.matches?.('details[data-k]')) { S.open ||= new Set(); d.open ? S.open.add(d.dataset.k) : S.open.delete(d.dataset.k); }
+}, true);
 
 async function decide(btn, kind) {
   const card = btn.closest('.card'), id = card.dataset.id, r = S.res[id];
@@ -648,7 +689,8 @@ function editSpace(id) {
   <label><input type="checkbox" id="sa" ${s.active ? 'checked' : ''}>Habilitado para reservas</label>
   <label><input type="checkbox" id="sr" ${s.requires_approval === false ? 'checked' : ''}>Se aprueba automáticamente (si no, cada solicitud espera la decisión de la administración)</label>
   <div>${S.features.map(f => `<label class="chip"><input type="checkbox" name="ft" value="${f.id}" ${have.has(f.id) ? 'checked' : ''}>${esc(f.name)}</label>`).join('')}</div>
-  <label>Agregar característica nueva<input id="nf" placeholder="Ej. Pizarra"></label><button>Guardar cambios</button></form>`;
+  <label>Agregar característica nueva<input id="nf" placeholder="Ej. Pizarra"></label><button>Guardar cambios</button>${s.id ? ' <button type="button" class="sec" data-act="sx" data-id="' + s.id + '">Eliminar este espacio</button>' : ''}</form>`;
+  $('#ef').scrollIntoView({block: 'nearest', behavior: 'smooth'});
   $('#sf').onsubmit = saveSpace;
   if (!s.id) $('#sk').onchange = () => { $('#sr').checked = $('#sk').value === 'resource'; }; // espacio nuevo: los recursos nacen con aprobación automática
   if (!s.id) $('#sr').checked = false;
@@ -689,6 +731,7 @@ const acts = {
   google: () => sb.auth.signInWithOAuth({provider: 'google', options: {redirectTo: location.origin + location.pathname}}),
   out: () => sb.auth.signOut(),
   again: () => loginView(),
+  sub: b => { S.sub = b.dataset.s; adminView(); },
   tab: b => { S.tab = b.dataset.t; S.edit = null; shell(); },
   em: b => { S.edit = S.mine[b.dataset.id]; S.editInit = 0; S.tab = 'new'; shell(); },
   na: () => { S.showNA = !S.showNA; renderAvail(); },
