@@ -40,11 +40,14 @@ button.sec{background:none;color:var(--ink);border-color:var(--line)}
 .tag{font-size:.82rem;padding:2px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
 .available,.approved{color:var(--ok)}.booked,.blackout,.inactive,.calendar_busy,.rejected,.cancelled{color:var(--bad)}.row.off{opacity:.6}.row.off .tag{color:var(--mut)}.pending{color:var(--warn)}.expired{color:var(--mut)}
 .chip{display:inline-block;margin-right:12px}details{margin:6px 0 12px}summary{cursor:pointer;color:var(--ac)}.pick{padding:8px 0}small,.muted{color:var(--mut)}
-dialog{font:inherit;border:1px solid var(--line);border-radius:10px;padding:20px;width:min(420px,92vw);background:var(--card);color:var(--ink)}
 button.wn{background:var(--bad);border-color:var(--bad);color:#fff}.ap[hidden]{display:none}
-dialog::backdrop{background:rgba(0,0,0,.45)}dialog h3{margin:0 0 12px;font-size:1.1rem}.dl{margin-bottom:18px;line-height:1.6;max-height:50vh;overflow:auto}.da{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
-#msg{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:92%;padding:10px 16px;border-radius:8px;color:#fff;z-index:9}
-#msg.ok{background:var(--ok)}#msg.bad{background:var(--bad)}
+.dl{margin-bottom:18px;line-height:1.6;max-height:50vh;overflow:auto;text-align:left}.da{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.ovl{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.35);background:color-mix(in srgb,var(--bg) 78%,transparent);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);animation:bfade .18s both}
+.ovl[hidden]{display:none}
+.ovb{width:min(420px,100%);max-height:86vh;overflow:auto;padding:22px;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.18)}
+.ovb h3{margin:0 0 12px;font-size:1.1rem}.ovb .mt{margin:0 0 16px;line-height:1.5;text-align:center;overflow-wrap:anywhere}
+.ico{width:46px;height:46px;margin:0 auto 12px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:1.5rem;font-weight:700}
+.ico.ok{background:var(--ok)}.ico.bad{background:var(--bad)}.ovb .da.c{justify-content:center}
 /* Lista de salas y recursos en la solicitud: tarjetas agrupadas */
 .obh{display:flex;align-items:center;gap:8px;font-size:1.05rem;margin-bottom:2px}.obh input{width:22px;height:22px;flex:none;margin:0}.obn{margin:0 0 10px}
 .hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.hd #navlink{font-weight:400;font-size:.88rem}
@@ -101,13 +104,13 @@ details.bg{padding-top:8px;padding-bottom:8px}details.bg[open]>summary{margin-bo
 <body>
 <main id="app">Cargando…</main>
 <footer id="pie"></footer>
-<div id="msg" role="status" hidden></div>
+<div id="msg" class="ovl" role="status" hidden></div>
 <div id="busy" role="status" aria-live="polite" hidden><div class="bx"><div class="spin" aria-hidden="true"></div><b id="busyt">Procesando…</b><small>Por favor espere unos segundos. No cierre la página ni vuelva a pulsar.</small></div></div>
 <script>
 /* ============ 1. CONFIGURACIÓN (lo único que debe editar para empezar) ============ */
 const SUPABASE_URL = 'https://zwypvyhxyvpkmlkwimyx.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_UGXL0ookgPQXW5guuHMwbA_a6qi_ECZ';
-
+  
 /* ============ 2. TEXTOS (se pueden cambiar sin riesgo) ============ */
 const TITLE = 'Reserva de salas y recursos';
 const MAP_URL = 'mapa-cse.png'; // croquis de la propiedad, subido junto a index.html. Vacío = sin mapa
@@ -153,13 +156,15 @@ const err = e => { const m = e.message || ''; const k = Object.keys(ERR).find(k 
 /* Ventana de confirmación propia (la del navegador siempre muestra el nombre del sitio como título) */
 function ask(question, lines, okText, noText) {
   return new Promise(res => {
-    const d = document.createElement('dialog');
-    d.innerHTML = `<form method="dialog"><h3>${esc(question)}</h3><div class="dl">${lines.map(l => `<div>${esc(l)}</div>`).join('')}</div>
-      <div class="da"><button value="no" class="sec">${esc(noText || 'Volver')}</button><button value="ok">${esc(okText || 'Aceptar')}</button></div></form>`;
-    d.addEventListener('close', () => { res(d.returnValue === 'ok'); d.remove(); });
+    const o = document.createElement('div'); o.className = 'ovl'; o.setAttribute('role', 'alertdialog'); o.setAttribute('aria-modal', 'true');
+    o.innerHTML = `<div class="ovb"><h3>${esc(question)}</h3><div class="dl">${lines.map(l => `<div>${esc(l)}</div>`).join('')}</div>
+      <div class="da"><button type="button" value="no" class="sec">${esc(noText || 'Volver')}</button><button type="button" value="ok">${esc(okText || 'Aceptar')}</button></div></div>`;
     const wasBusy = S.busy; if (wasBusy) $('#busy').hidden = true; // el indicador no tapa el cuadro de confirmación
-    d.addEventListener('close', () => { if (wasBusy && S.busy) $('#busy').hidden = false; });
-    document.body.appendChild(d); d.showModal();
+    const key = e => { if (e.key === 'Escape') done(false); };
+    const done = v => { if (!o.isConnected) return; o.remove(); document.removeEventListener('keydown', key); if (wasBusy && S.busy) $('#busy').hidden = false; res(v); };
+    o.addEventListener('click', e => { const b = e.target.closest('button[value]'); if (b) done(b.value === 'ok'); else if (e.target === o) done(false); });
+    document.addEventListener('keydown', key);
+    document.body.appendChild(o); o.querySelector('button[value=ok]').focus();
   });
 }
 
@@ -184,10 +189,17 @@ const rango = r => dia(r.starts_at) === dia(r.ends_at)
   : dia(r.starts_at) + ', ' + hora(r.starts_at) + ' a ' + dia(r.ends_at) + ', ' + hora(r.ends_at);
 const spaceLine = s => (s?.kind === 'resource' ? 'Recurso ' : 'Sala ') + (s?.name || '');
 const S = {tab:'new', spaces:[], buildings:[], features:[], profile:null, admin:false, user:null, res:{}};
+// Mensajes: tarjeta al centro con el fondo atenuado (como el indicador de espera).
+// Los errores esperan a que se pulse «Entendido»; los de éxito se cierran solos a los 4 s.
+function msgClose() { clearTimeout(msg.t); $('#msg').hidden = true; }
 function msg(t, bad) {
-  const m = $('#msg'); m.textContent = t; m.className = bad ? 'bad' : 'ok'; m.hidden = false;
-  clearTimeout(msg.t); msg.t = setTimeout(() => m.hidden = true, 6000);
+  const m = $('#msg'); clearTimeout(msg.t);
+  m.innerHTML = `<div class="ovb"><div class="ico ${bad ? 'bad' : 'ok'}" aria-hidden="true">${bad ? '!' : '✓'}</div><p class="mt">${esc(t)}</p><div class="da c"><button type="button" id="msgok">Entendido</button></div></div>`;
+  m.setAttribute('role', bad ? 'alertdialog' : 'status'); m.hidden = false;
+  if (!bad) msg.t = setTimeout(msgClose, 4000);
+  else $('#msgok').focus();
 }
+$('#msg').addEventListener('click', e => { if (e.target.id === 'msgok' || e.target === e.currentTarget) msgClose(); });
 // Edificio completo: se muestra "Casa Principal completa" en lugar de cada sala del edificio
 const bOf = r => r.whole_building_id ? S.buildings.find(b => b.id === r.whole_building_id) : null;
 const inB = (i, b) => b && i.spaces?.kind === 'room' && i.spaces?.building_id === b.id;
@@ -495,10 +507,13 @@ function seriesDates(d0, h1, h2, every, until) {
 // Mensaje final con botón único (para resultados largos)
 function tell(title, lines) {
   return new Promise(res => {
-    const d = document.createElement('dialog');
-    d.innerHTML = `<form method="dialog"><h3>${esc(title)}</h3><div class="dl">${lines.map(l => `<div>${esc(l)}</div>`).join('')}</div><div class="da"><button value="ok">Entendido</button></div></form>`;
-    d.addEventListener('close', () => { res(); d.remove(); });
-    document.body.appendChild(d); d.showModal();
+    const o = document.createElement('div'); o.className = 'ovl'; o.setAttribute('role', 'alertdialog'); o.setAttribute('aria-modal', 'true');
+    o.innerHTML = `<div class="ovb"><h3>${esc(title)}</h3><div class="dl">${lines.map(l => `<div>${esc(l)}</div>`).join('')}</div><div class="da"><button type="button" value="ok">Entendido</button></div></div>`;
+    const key = e => { if (e.key === 'Escape') done(); };
+    const done = () => { if (!o.isConnected) return; o.remove(); document.removeEventListener('keydown', key); res(); };
+    o.addEventListener('click', e => { if (e.target.closest('button[value]') || e.target === o) done(); });
+    document.addEventListener('keydown', key);
+    document.body.appendChild(o); o.querySelector('button[value=ok]').focus();
   });
 }
 const horaTxt = (a, b) => hora(a) + ' a ' + hora(b);
