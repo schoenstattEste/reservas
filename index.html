@@ -110,7 +110,7 @@ details.bg{padding-top:8px;padding-bottom:8px}details.bg[open]>summary{margin-bo
 /* ============ 1. CONFIGURACIÓN (lo único que debe editar para empezar) ============ */
 const SUPABASE_URL = 'https://zwypvyhxyvpkmlkwimyx.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_UGXL0ookgPQXW5guuHMwbA_a6qi_ECZ';
-  
+
 /* ============ 2. TEXTOS (se pueden cambiar sin riesgo) ============ */
 const TITLE = 'Reserva de salas y recursos';
 const MAP_URL = 'mapa-cse.png'; // croquis de la propiedad, subido junto a index.html. Vacío = sin mapa
@@ -138,7 +138,7 @@ const ERR = {invalid_time:'El horario no es válido o ya pasó.', no_spaces:'Eli
   building_not_allowed:'Ese edificio no se puede reservar completo.', no_rooms:'El edificio no tiene salas habilitadas.',
   'violates foreign key':'No se puede eliminar: tiene salas o reservas asociadas.'};
 const MAXDAYS = 90; // anticipación máxima de una reserva
-const EVMIN = 15, EVMAX = 50; // largo permitido del nombre del evento
+const EVMIN = 8, EVMAX = 50; // largo permitido del nombre del evento
 
 /* ============ 3. UTILIDADES ============ */
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -319,7 +319,7 @@ function newView() {
   <label>Hasta el<input type="date" id="ru"></label></div>
   <p class="muted" id="rpn" hidden><small>Se repite el mismo día de la semana y a la misma hora. Abajo se muestra la disponibilidad de la primera fecha; las demás se revisan al continuar y las que choquen se omiten.</small></p></div>` : ''}
   <label>Nombre del evento<input id="pp" required maxlength="${EVMAX}" placeholder="ej. Reunión grupo G-66" autocomplete="off" value="${esc(ed?.purpose)}">
-  <small id="pcnt" class="muted" style="display:block;text-align:right;font-size:.7rem;margin-top:2px"></small></label>
+  <span style="display:flex;justify-content:space-between;gap:10px;margin-top:2px"><small class="muted" style="font-size:.7rem">Escriba qué actividad es y qué grupo la realiza.</small><small id="pcnt" class="muted" style="font-size:.7rem;white-space:nowrap"></small></span></label>
   <h3 class="hd">Salas y recursos <button type="button" class="lnk" id="mapbtn" aria-expanded="false" aria-controls="mapbox" hidden>Ver mapa de la propiedad</button><span id="navlink"></span></h3>
   <div id="mapbox" hidden><a href="${MAP_URL}" target="_blank" rel="noopener"><img src="${MAP_URL}" alt="Mapa de la propiedad con la ubicación de las casas y salas" style="display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:10px"></a><small class="muted">Toque el mapa para verlo en grande.</small></div>
   <div id="av" class="muted">Elija fecha y horario para ver qué está disponible.</div><br>
@@ -330,7 +330,7 @@ function newView() {
   const pp = $('#pp'), nameCheck = () => {
     const n = pp.value.trim().length;
     $('#pcnt').textContent = pp.value.length + ' / ' + EVMAX + ' caracteres';
-    pp.setCustomValidity(n < EVMIN ? 'Escriba al menos ' + EVMIN + ' caracteres para el nombre del evento (lleva ' + n + ').' : n > EVMAX ? 'El nombre del evento admite máximo ' + EVMAX + ' caracteres.' : '');
+    pp.setCustomValidity(n < EVMIN ? 'Escriba un poco más: qué actividad es y qué grupo la realiza (mínimo ' + EVMIN + ' caracteres, lleva ' + n + '). Ej. Reunión grupo G-66.' : n > EVMAX ? 'El nombre del evento admite máximo ' + EVMAX + ' caracteres.' : '');
   };
   pp.oninput = nameCheck; nameCheck();
   if (MAP_URL) { // el botón del mapa solo aparece si la imagen existe
@@ -661,7 +661,8 @@ async function submit(e) {
   const [a, b] = range();
   if (!a) return msg('Revise la fecha y las horas.', 1);
   const evn = $('#pp').value.trim().length;
-  if (evn < EVMIN || evn > EVMAX) return msg('El nombre del evento debe tener entre ' + EVMIN + ' y ' + EVMAX + ' caracteres.', 1);
+  if (evn < EVMIN) return msg('Escriba un poco más en el nombre del evento: qué actividad es y qué grupo la realiza (mínimo ' + EVMIN + ' caracteres). Ej. Reunión grupo G-66.', 1);
+  if (evn > EVMAX) return msg('El nombre del evento admite máximo ' + EVMAX + ' caracteres.', 1);
   if (!S.admin && new Date(a) > Date.now() + MAXDAYS * 864e5) return msg(ERR.too_far, 1);
   const ids = [...document.querySelectorAll('[name=sp]:checked')].map(x => x.value);
   const bld = S.buildings.find(x => x.id === document.querySelector('[name=bld]:checked')?.value) || null;
