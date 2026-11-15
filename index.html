@@ -99,6 +99,20 @@ details.bg{padding-top:8px;padding-bottom:8px}details.bg[open]>summary{margin-bo
 .help{text-align:center;margin:20px 0 0;font-size:.9rem}.help a{color:var(--ac)}
 .logo-sm{width:32px;height:32px;object-fit:contain;vertical-align:middle;margin-right:8px}
 @media(prefers-color-scheme:dark){.brand img,.logo-sm{background:#fff;border-radius:12px;padding:4px}}
+input[type=radio]{display:inline-block;width:auto;margin:0}
+.gx{margin:6px 0 10px}.gx .q{display:block;margin-bottom:6px;font-size:.9rem;color:var(--mut)}.gx .q b{color:var(--bad)}.gx .opts{display:grid;grid-template-columns:1fr;gap:8px}
+.gx .o{display:grid;grid-template-columns:auto 1fr;column-gap:10px;align-items:center;margin:0;padding:10px 12px;border:1.5px solid var(--line);border-radius:12px;background:var(--card);cursor:pointer;line-height:1.25;color:var(--ink)}
+.gx .o input{grid-row:1/3;width:20px;height:20px;accent-color:var(--ac)}.gx .o strong{font-size:1rem}.gx .o span{font-size:.8rem;color:var(--mut)}
+.gx .o:has(input:checked){border-color:var(--gold);box-shadow:0 0 0 2px color-mix(in srgb,var(--gold) 30%,transparent);background:color-mix(in srgb,var(--gold) 10%,var(--card))}
+.nt{margin:8px 0;padding:9px 12px;border-left:4px solid var(--warn);background:color-mix(in srgb,var(--warn) 12%,var(--card));border-radius:8px;font-size:.8rem;line-height:1.4;color:var(--ink)}
+.pv{display:inline-block;font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:99px;background:var(--gold);color:#010066;white-space:nowrap}
+.gh{display:flex;align-items:center;gap:8px;margin:14px 0 6px;font-size:1rem}.gh .n{font-size:.75rem;font-weight:700;padding:1px 8px;border-radius:99px;background:var(--line);color:var(--ink)}
+.gh.pr{padding-left:8px;border-left:5px solid var(--gold)}.hint{font-size:.78rem;color:var(--mut);margin:-2px 0 6px}
+.chip.na{opacity:.55}.assign{margin:8px 0}
+label.sw{display:flex;align-items:center;gap:10px;color:var(--ink);font-size:1rem}
+.sw input{appearance:none;-webkit-appearance:none;width:44px;height:26px;margin:0;border-radius:99px;background:var(--line);position:relative;cursor:pointer;flex:none;border:0;padding:0}
+.sw input::after{content:'';position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .15s}
+.sw input:checked{background:var(--ok)}.sw input:checked::after{left:21px}
 </style>
 </head>
 <body>
@@ -128,7 +142,8 @@ const ERR = {invalid_time:'El horario no es válido o ya pasó.', no_spaces:'Eli
   unavailable:'Alguno de los espacios ya no está disponible en ese horario.', not_authenticated:'Inicie sesión.',
   exclusion:'Ese horario choca con otra reserva aprobada.',
   not_cancellable:'Esta reserva ya no se puede cancelar.', not_editable:'Esta reserva ya no se puede editar.', already_past:'Esa reserva ya pasó.', not_found:'No se encontró la reserva.',
-  too_far:'Solo se puede reservar con un máximo de 90 días de anticipación.',
+  too_far:'Esa fecha está más lejos de lo permitido.', private_disabled:'Los eventos privados no están disponibles por ahora.',
+  not_root:'Solo la cuenta principal puede cambiar la configuración.', bad_value:'Revise los valores: los días deben estar dentro del rango permitido.',
   edit_too_late:'Faltan menos de 24 horas para la reserva: solo se puede cancelar.',
   space_locked:'La administración asignó la sala de esta reserva: puede cambiar la fecha y la hora, pero no la sala.',
   edit_needs_admin:'Para cambiar esta reserva, comuníquese con la administración o cancélela.',
@@ -137,7 +152,10 @@ const ERR = {invalid_time:'El horario no es válido o ya pasó.', no_spaces:'Eli
   calendar_check_failed:'No se pudo verificar el calendario. Intente de nuevo; se conservó la reserva original.',
   building_not_allowed:'Ese edificio no se puede reservar completo.', no_rooms:'El edificio no tiene salas habilitadas.',
   'violates foreign key':'No se puede eliminar: tiene salas o reservas asociadas.'};
-const MAXDAYS = 90; // anticipación máxima de una reserva
+// Anticipación máxima según el tipo de actividad: los valores se editan en Administración > Configuración (cuenta principal)
+const maxDays = k => k === 'private' ? S.cfg.private_max_days : S.cfg.group_max_days;
+const tooFarMsg = k => 'Solo se puede reservar con un máximo de ' + maxDays(k) + ' días de anticipación.';
+const dayLimit = k => new Date(Date.now() + maxDays(k) * 864e5);
 const EVMIN = 8, EVMAX = 50; // largo permitido del nombre del evento
 
 /* ============ 3. UTILIDADES ============ */
@@ -152,7 +170,7 @@ const fmt = d => new Date(d).toLocaleString('es', {dateStyle:'medium', timeStyle
 const loc = d => { const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0,16); };
 const iso = v => new Date(v).toISOString();
 const uuid = () => crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); });
-const err = e => { const m = e.message || ''; const k = Object.keys(ERR).find(k => m.includes(k)); return k ? ERR[k] : m; };
+const err = e => { const m = e.message || ''; const k = Object.keys(ERR).find(k => m.includes(k)); return k === 'too_far' ? tooFarMsg(S.kind || 'group') : k ? ERR[k] : m; };
 /* Ventana de confirmación propia (la del navegador siempre muestra el nombre del sitio como título) */
 function ask(question, lines, okText, noText) {
   return new Promise(res => {
@@ -188,7 +206,8 @@ const rango = r => dia(r.starts_at) === dia(r.ends_at)
   ? dia(r.starts_at) + ' · ' + hora(r.starts_at) + ' a ' + hora(r.ends_at)
   : dia(r.starts_at) + ', ' + hora(r.starts_at) + ' a ' + dia(r.ends_at) + ', ' + hora(r.ends_at);
 const spaceLine = s => (s?.kind === 'resource' ? 'Recurso ' : 'Sala ') + (s?.name || '');
-const S = {tab:'new', spaces:[], buildings:[], features:[], profile:null, admin:false, user:null, res:{}};
+const S = {tab:'new', spaces:[], buildings:[], features:[], profile:null, admin:false, user:null, res:{}, kind:'group',
+  cfg:{private_enabled:false, private_max_days:365, group_max_days:90}}; // sin la migración 14 los eventos privados quedan desactivados
 // Mensajes: tarjeta al centro con el fondo atenuado (como el indicador de espera).
 // Los errores esperan a que se pulse «Entendido»; los de éxito se cierran solos a los 4 s.
 function msgClose() { clearTimeout(msg.t); $('#msg').hidden = true; }
@@ -204,7 +223,8 @@ $('#msg').addEventListener('click', e => { if (e.target.id === 'msgok' || e.targ
 const bOf = r => r.whole_building_id ? S.buildings.find(b => b.id === r.whole_building_id) : null;
 const inB = (i, b) => b && i.spaces?.kind === 'room' && i.spaces?.building_id === b.id;
 const names = r => { const b = bOf(r);
-  return [...(b ? [b.name + ' completa'] : []), ...(r.reservation_items || []).filter(i => !inB(i, b)).map(i => i.spaces?.name || 'Espacio')].join(', '); };
+  return [...(b ? [b.name + ' completa'] : []), ...(r.reservation_items || []).filter(i => !inB(i, b)).map(i => i.spaces?.name || 'Espacio')].join(', ') || (r.kind === 'private' ? 'Espacios por asignar' : ''); };
+const kindTag = r => r.kind === 'private' ? '<span class="pv">Evento privado</span>' : '';
 // Salas del edificio que la administración liberó de una reserva de edificio completo
 const released = r => { const b = bOf(r), cur = new Set((r.reservation_items || []).map(i => i.space_id));
   return b ? S.spaces.filter(s => s.active && s.kind === 'room' && s.building_id === b.id && !cur.has(s.id)).map(s => s.name) : []; };
@@ -218,6 +238,21 @@ const spacePickBody = r => {
     `<label class="chip"><input type="checkbox" value="${s.id}" ${cur.has(s.id) ? 'checked' : ''}>${esc(s.name)}${s.capacity ? ' (' + s.capacity + ' pers.)' : ''}</label>`).join('')}</div>
     <small class="muted">Marque lo que quedará en la reserva y pulse ${r.status === 'pending' ? 'Aprobar' : 'Guardar cambios'}. El nuevo espacio debe estar libre en ese horario.</small>`;
 };
+// Evento privado pendiente: la administración elige los espacios entre los que están libres en ese horario
+const assignBox = r => `<div class="assign"><b>Asignar espacios (libres en ese horario)</b><div class="pick" data-lazy="1"><small class="muted">Cargando…</small></div>
+  <small class="muted">Marque los espacios que quedarán en el evento y pulse «Aprobar y asignar». Si cambia la fecha u hora, la lista se actualiza.</small></div>`;
+async function loadAssign(box) {
+  const card = box.closest('.card'), id = card?.dataset.id, r = S.res[id];
+  if (!r) return;
+  const s = card.querySelector('.s') ? iso(card.querySelector('.s').value) : r.starts_at, e = card.querySelector('.e') ? iso(card.querySelector('.e').value) : r.ends_at;
+  const keep = new Set([...box.querySelectorAll('input:checked')].map(x => x.value));
+  if (!box.dataset.init) { box.dataset.init = 1; (r.reservation_items || []).forEach(i => keep.add(i.space_id)); }
+  const act = S.spaces.filter(x => x.active);
+  const st = await Promise.all(act.map(x => sb.rpc('check_availability_for', {p_space: x.id, p_start: s, p_end: e, p_exclude: id}).then(q => q.data)));
+  box.innerHTML = act.map((x, i) => { const ok = st[i] === 'available';
+    return `<label class="chip ${ok ? '' : 'na'}"><input type="checkbox" value="${x.id}" ${ok && keep.has(x.id) ? 'checked' : ''} ${ok ? '' : 'disabled'}>${esc(x.name)}${x.capacity ? ' (' + x.capacity + ' pers.)' : ''}${ok ? '' : ' — no disponible'}</label>`; }).join('')
+    || '<small class="muted">No hay espacios habilitados.</small>';
+}
 const feats = s => { const f = (s.space_features || []).map(x => x.features.name + (x.detail ? ' ' + x.detail : '')).join(', '); return f ? ' · ' + esc(f) : ''; };
 
 /* ============ 4. INICIO DE SESIÓN ============ */
@@ -276,12 +311,14 @@ function sentView(email) {
 }
 
 async function loadBase() {
-  const [sp, ft, pf, ad, bd] = await Promise.all([
+  const [sp, ft, pf, ad, bd, cf] = await Promise.all([
     sb.from('spaces').select('*, space_features(feature_id, detail, features(name))').order('name'),
     sb.from('features').select('*').order('name'),
     sb.from('profiles').select('*').eq('user_id', S.user.id).maybeSingle(),
     sb.from('admins').select('user_id, can_create_for_others').eq('user_id', S.user.id).maybeSingle(),
-    sb.from('buildings').select('*').order('name')]);
+    sb.from('buildings').select('*').order('name'),
+    sb.rpc('app_config')]);
+  S.cfg = {private_enabled:false, private_max_days:365, group_max_days:90, ...(cf && !cf.error && cf.data ? cf.data : {})};
   S.buildings = bd.data || [];
   S.spaces = sp.data || []; S.features = ft.data || []; S.profile = pf.data; S.admin = !!ad.data; S.root = !!ad.data?.can_create_for_others;
 }
@@ -305,29 +342,53 @@ function shell() {
 /* ============ 6. NUEVA SOLICITUD ============ */
 function newView() {
   const p = S.profile || {}, ed = S.edit, sd = ed ? loc(ed.starts_at) : '', ee = ed ? loc(ed.ends_at) : '';
-  $('#view').innerHTML = `<form id="f" class="card"><h2>${ed ? (ed.status === 'approved' ? 'Editar reserva' : 'Editar solicitud') : 'Nueva solicitud'}</h2>
+  $('#view').innerHTML = `<form id="f" class="card"><h2>${ed ? (ed.status === 'approved' ? (ed.kind === 'private' ? 'Solicitar cambio' : 'Editar reserva') : 'Editar solicitud') : 'Nueva solicitud'}</h2>
+  ${ed?.kind === 'private' && ed.status === 'approved' ? '<p class="muted"><small>Un cambio en un evento privado aprobado vuelve a revisión de la administración. Hasta que se apruebe de nuevo, el evento queda pendiente.</small></p>' : ''}
   ${S.root && !ed ? `<label class="obh"><input type="checkbox" id="ob"> <b>Crear en nombre de otra persona</b></label>
   <p class="muted obn" id="obn"><small>Como administrador, esta reserva queda aprobada de inmediato, en cualquier sala o recurso.</small></p>` : ''}
   ${S.admin && !S.root && !ed ? '<p class="muted"><small>Como administrador, esta reserva queda aprobada de inmediato, en cualquier sala o recurso.</small></p>' : ''}
   <div class="g"><label><span id="nml">Nombre completo</span><input id="nm" required value="${esc(p.full_name)}"></label>
   <label>Teléfono<input id="ph" required value="${esc(p.phone)}"></label></div>
   ${S.root && !ed ? '<label id="eml" hidden>Correo de la persona (opcional, para enviarle la confirmación)<input type="email" id="emx" autocomplete="off" placeholder="ejemplo@correo.com"></label>' : ''}
-  <div class="g"><label>Fecha<input type="date" id="dt" required min="${loc(new Date()).slice(0, 10)}" ${S.admin ? '' : `max="${loc(new Date(Date.now() + MAXDAYS * 864e5)).slice(0, 10)}"`} value="${sd.slice(0, 10)}"></label><label>Hora de inicio<input type="time" id="t1" required value="${sd.slice(11, 16)}"></label>
+  <div class="g"><label>Fecha<input type="date" id="dt" required min="${loc(new Date()).slice(0, 10)}" ${S.admin ? '' : `max="${loc(dayLimit(ed?.kind || 'group')).slice(0, 10)}"`} value="${sd.slice(0, 10)}"></label><label>Hora de inicio<input type="time" id="t1" required value="${sd.slice(11, 16)}"></label>
   <label>Hora de fin<input type="time" id="t2" required value="${ee.slice(11, 16)}"></label><label>Cantidad de asistentes<input type="number" id="at" inputmode="numeric" min="1" step="1" placeholder="ej. 12" ${S.admin ? '' : 'required'} value="${ed?.attendees ?? ''}"></label></div>
-  ${S.admin ? '' : `<small class="muted" style="display:block;font-size:.78rem;margin:-4px 0 8px">Puede reservar con hasta ${MAXDAYS} días de anticipación (hasta el ${new Date(Date.now() + MAXDAYS * 864e5).toLocaleDateString('es-CR', { day: 'numeric', month: 'long', year: 'numeric' })}).</small>`}
+  ${S.admin ? '' : `<small class="muted" id="dnote" style="display:block;font-size:.78rem;margin:-4px 0 8px">${dnoteText(ed?.kind || 'group')}</small>`}
   ${S.root && !ed ? `<div class="rpb"><label class="obh"><input type="checkbox" id="rp"> <b>Repetir esta reserva</b></label>
   <div class="g" id="rpf" hidden><label>Se repite<select id="re"><option value="1">Cada semana</option><option value="2">Cada 2 semanas</option></select></label>
   <label>Hasta el<input type="date" id="ru"></label></div>
   <p class="muted" id="rpn" hidden><small>Se repite el mismo día de la semana y a la misma hora. Abajo se muestra la disponibilidad de la primera fecha; las demás se revisan al continuar y las que choquen se omiten.</small></p></div>` : ''}
+  ${!ed && S.cfg.private_enabled ? `<div class="gx"><span class="q" id="kq">¿Qué tipo de actividad es?${S.admin ? '' : ' <b>*</b>'}</span><div class="opts" role="radiogroup" aria-labelledby="kq">
+  <label class="o"><input type="radio" name="kind" value="group" ${S.admin ? 'checked' : 'required'}><strong>Actividad de grupos</strong><span>Reunión, vinculación, formación, taller u otra actividad propia</span></label>
+  <label class="o"><input type="radio" name="kind" value="private"><strong>Evento privado</strong><span>Cumpleaños, bodas u otros eventos que no son de grupos Schoenstatt</span></label></div>
+  <div class="nt" id="pvnote" hidden><b>La fecha aún no está reservada.</b> La administración revisará su solicitud, le asignará el espacio y le responderá por correo.</div></div>` : ''}
   <label>Nombre del evento<input id="pp" required maxlength="${EVMAX}" placeholder="ej. Reunión grupo G-66" autocomplete="off" value="${esc(ed?.purpose)}">
-  <span style="display:flex;justify-content:space-between;gap:10px;margin-top:2px"><small class="muted" style="font-size:.7rem">Escriba qué actividad es y qué grupo la realiza.</small><small id="pcnt" class="muted" style="font-size:.7rem;white-space:nowrap"></small></span></label>
-  <h3 class="hd">Salas y recursos <button type="button" class="lnk" id="mapbtn" aria-expanded="false" aria-controls="mapbox" hidden>Ver mapa de la propiedad</button><span id="navlink"></span></h3>
+  <span style="display:flex;justify-content:space-between;gap:10px;margin-top:2px"><small class="muted" id="phelp" style="font-size:.7rem">Escriba qué actividad es y qué grupo la realiza.</small><small id="pcnt" class="muted" style="font-size:.7rem;white-space:nowrap"></small></span></label>
+  <label id="dtlbox" hidden>Detalles o necesidades (opcional)<textarea id="dtl" rows="3" maxlength="500" placeholder="ej. Salón grande, montaje de mesas, uso de cocina…">${esc(ed?.details)}</textarea></label>
+  <div id="grpbox"><h3 class="hd">Salas y recursos <button type="button" class="lnk" id="mapbtn" aria-expanded="false" aria-controls="mapbox" hidden>Ver mapa de la propiedad</button><span id="navlink"></span></h3>
   <div id="mapbox" hidden><a href="${MAP_URL}" target="_blank" rel="noopener"><img src="${MAP_URL}" alt="Mapa de la propiedad con la ubicación de las casas y salas" style="display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:10px"></a><small class="muted">Toque el mapa para verlo en grande.</small></div>
   <div id="av" class="muted">Elija fecha y horario para ver qué está disponible.</div><br>
   <div class="sumbar" id="sumbar" hidden><div class="sum"><small>Seleccionado</small><b id="sumtxt">Aún no ha elegido ninguna</b><span id="summsg" class="muted">Elija una o más salas o recursos.</span></div>
-  <div><button id="go">${ed ? 'Guardar cambios' : 'Continuar'}</button>${ed ? ' <button type="button" class="sec" data-act="tab" data-t="mine">Volver sin guardar</button>' : ''}</div></div></form>`;
+  <div><button id="go">${ed ? 'Guardar cambios' : 'Continuar'}</button>${ed ? ' <button type="button" class="sec" data-act="tab" data-t="mine">Volver sin guardar</button>' : ''}</div></div></div>
+  <div id="pvbox" hidden><h3>Salas y recursos</h3><p class="muted" style="margin:0 0 10px">No necesita elegirlos: la administración los asignará.</p>
+  <div class="sumbar"><div class="sum"><b>Evento privado</b><span class="wait">Su solicitud pasará a revisión de la administración.</span></div>
+  <div><button id="gop">${ed ? (ed.status === 'approved' ? 'Solicitar cambio' : 'Guardar cambios') : 'Enviar solicitud'}</button>${ed ? ' <button type="button" class="sec" data-act="tab" data-t="mine">Volver sin guardar</button>' : ''}</div></div></div></form>`;
   S.showNA = false; S.av = null;
-  if (!S.admin) { const dd = $('#dt'); dd.addEventListener('input', () => dd.setCustomValidity(dd.value && dd.max && dd.value > dd.max ? ERR.too_far : '')); }
+  // Tipo de actividad: el evento privado no muestra salas (las asigna la administración) y tiene su propio límite de anticipación
+  const applyKind = () => {
+    const k = ed ? ed.kind : ($('[name=kind]:checked')?.value || 'group'), priv = k === 'private', noRooms = priv && !S.admin;
+    S.kind = k;
+    $('#grpbox').hidden = noRooms; $('#pvbox').hidden = !noRooms; $('#dtlbox').hidden = !priv;
+    if ($('#pvnote')) $('#pvnote').hidden = !noRooms;
+    $('#pp').placeholder = priv ? 'ej. Boda familia Mora' : 'ej. Reunión grupo G-66';
+    $('#phelp').textContent = priv ? 'Escriba qué evento es y quién lo realiza.' : 'Escriba qué actividad es y qué grupo la realiza.';
+    if ($('#rp')) { $('.rpb').hidden = priv; if (priv && $('#rp').checked) { $('#rp').checked = false; $('#rp').onchange(); } }
+    if (!S.admin) {
+      const dd = $('#dt'); dd.max = loc(dayLimit(k)).slice(0, 10);
+      dd.setCustomValidity(dd.value && dd.value > dd.max ? tooFarMsg(k) : '');
+      $('#dnote').textContent = dnoteText(k);
+    }
+  };
+  if (!S.admin) { const dd = $('#dt'); dd.addEventListener('input', () => dd.setCustomValidity(dd.value && dd.max && dd.value > dd.max ? tooFarMsg(S.kind) : '')); }
   // Nombre del evento: de EVMIN a EVMAX caracteres (sin contar espacios sobrantes), con contador
   const pp = $('#pp'), nameCheck = () => {
     const n = pp.value.trim().length;
@@ -353,8 +414,11 @@ function newView() {
     $('#obn').firstChild.textContent = on ? 'La reserva queda aprobada de inmediato y la confirmación se envía a la persona (si escribe su correo). Usted la verá en "Mis reservas".' : 'Como administrador, esta reserva queda aprobada de inmediato, en cualquier sala o recurso.';
     if (on) $('#nm').focus();
   };
-  if (ed) avail();
+  document.querySelectorAll('[name=kind]').forEach(x => x.onchange = applyKind);
+  applyKind();
+  if (ed && ed.kind !== 'private') avail();
 }
+const dnoteText = k => 'Puede reservar con hasta ' + maxDays(k) + ' días de anticipación (hasta el ' + dayLimit(k).toLocaleDateString('es-CR', {day: 'numeric', month: 'long', year: 'numeric'}) + ').';
 function range() {
   const d = $('#dt').value, a = $('#t1').value, b = $('#t2').value;
   if (!d || !a || !b) return [];
@@ -634,13 +698,13 @@ async function cancelSeries(btn) {
   adminView();
 }
 // Administración: la reserva se crea aprobada (propia o a nombre de otra persona), se registra en Calendar y se avisa por correo
-async function adminSubmit({a, b, ids, bld, chosen}) {
+async function adminSubmit({a, b, ids, bld, chosen, kind, details}) {
   const third = !!$('#ob')?.checked;
   const name = $('#nm').value.trim(), phone = $('#ph').value.trim(), mail = $('#emx')?.value.trim() || '';
   if (third && (!name || !phone)) return msg(ERR.contact_incomplete, 1);
   if ($('#rp')?.checked) return seriesSubmit({a, b, ids, bld, chosen, third, name, phone, mail});
   const ok = await ask('¿Desea crear la reserva aprobada?', [...(third ? ['A nombre de: ' + name + ' (' + phone + (mail ? ', ' + mail : '') + ')'] : []),
-    ...(bld ? [bld.name + ' completa'] : []), ...chosen.map(spaceLine), ...when(a, b), 'Queda aprobada de inmediato.'], 'Crear reserva', 'Volver');
+    ...(bld ? [bld.name + ' completa'] : []), ...chosen.map(spaceLine), ...when(a, b), ...(kind === 'private' ? ['Evento privado: se enviará copia a la administración zonal.'] : []), 'Queda aprobada de inmediato.'], 'Crear reserva', 'Volver');
   if (!ok) return;
   busyText('Creando la reserva…');
   if (!third) { // reserva propia: se actualiza el perfil como siempre
@@ -649,13 +713,16 @@ async function adminSubmit({a, b, ids, bld, chosen}) {
     S.profile = pf;
   }
   const r = await sb.rpc('admin_create_reservation', {p_purpose: $('#pp').value.trim(), p_attendees: +$('#at').value || null, p_start: a, p_end: b,
-    p_space_ids: ids, p_building: bld?.id ?? null, p_name: third ? name : null, p_phone: third ? phone : null, p_email: third ? mail : null});
+    p_space_ids: ids, p_building: bld?.id ?? null, p_name: third ? name : null, p_phone: third ? phone : null, p_email: third ? mail : null,
+    ...(kind === 'private' ? {p_kind: 'private', p_details: details || null} : {})});
   if (r.error) return msg(err(r.error), 1);
   const f = await sb.functions.invoke('sync-calendar', {body: {reservation_id: r.data}});
   let mailOk = true;
-  { const n = await sb.functions.invoke('notify', {body: {reservation_id: r.data, event: 'decision'}}); mailOk = !n.error; }
+  let zon = '';
+  { const n = await sb.functions.invoke('notify', {body: {reservation_id: r.data, event: 'decision'}}); mailOk = !n.error && n.data?.zonal !== 'error';
+    if (kind === 'private') zon = n.data?.zonal === 'enviada' ? ' Se envió copia a la administración zonal.' : n.data?.zonal === 'sin correo' ? ' No hay correo de la administración zonal configurado.' : ' No se pudo enviar la copia a la administración zonal.'; }
   msg('Reserva creada y aprobada.' + (f.error ? ' Google Calendar no se actualizó; vuelva a guardarla desde Administración para reintentar.' : ' Quedó registrada en el calendario.')
-    + (third && !mail ? '' : mailOk ? ' Se envió la confirmación por correo.' : ' No se pudo enviar el correo.'), !!f.error || !mailOk);
+    + (third && !mail ? '' : mailOk ? ' Se envió la confirmación por correo.' : ' No se pudo enviar el correo.') + zon, !!f.error || !mailOk);
   S.edit = null; S.tab = 'mine'; shell();
 }
 async function submit(e) {
@@ -666,7 +733,11 @@ async function submit(e) {
   const evn = $('#pp').value.trim().length;
   if (evn < EVMIN) return msg('Escriba un poco más en el nombre del evento: qué actividad es y qué grupo la realiza (mínimo ' + EVMIN + ' caracteres). Ej. Reunión grupo G-66.', 1);
   if (evn > EVMAX) return msg('El nombre del evento admite máximo ' + EVMAX + ' caracteres.', 1);
-  if (!S.admin && new Date(a) > Date.now() + MAXDAYS * 864e5) return msg(ERR.too_far, 1);
+  if (!S.admin && !S.edit && $('[name=kind]') && !$('[name=kind]:checked')) return msg('Elija el tipo de actividad: actividad de grupos o evento privado.', 1);
+  const kind = S.edit ? S.edit.kind : ($('[name=kind]:checked')?.value || 'group'), noRooms = kind === 'private' && !S.admin;
+  S.kind = kind;
+  if (!S.admin && new Date(a) > Date.now() + maxDays(kind) * 864e5) return msg(tooFarMsg(kind), 1);
+  if (noRooms) return privSubmit({a, b, details: $('#dtl')?.value.trim() || ''});
   const ids = [...document.querySelectorAll('[name=sp]:checked')].map(x => x.value);
   const bld = S.buildings.find(x => x.id === document.querySelector('[name=bld]:checked')?.value) || null;
   if (!ids.length && !bld) return msg(ERR.no_spaces, 1);
@@ -676,7 +747,7 @@ async function submit(e) {
   const cal = repeating ? null : await calendarBusy(a, b, ed?.id); // revisión final por si alguien reservó mientras tanto
   if (cal && [...ids, ...rooms.map(s => s.id), ...(bld ? [bld.id] : [])].some(i => cal[i])) return msg('Alguno de los espacios ya tiene una reserva en ese horario. Vuelva a elegir.', 1);
   const chosen = S.spaces.filter(s => ids.includes(s.id));
-  if (S.admin && !ed) return adminSubmit({a, b, ids, bld, chosen});
+  if (S.admin && !ed) return adminSubmit({a, b, ids, bld, chosen, kind, details: $('#dtl')?.value.trim() || ''});
   const auto = !bld && chosen.every(s => s.requires_approval === false);
   let q, okTxt, extra = [];
   if (ed) { q = editAppr ? '¿Desea guardar los cambios de la reserva?' : '¿Desea guardar los cambios de la solicitud de reserva?'; okTxt = 'Guardar cambios'; }
@@ -730,6 +801,28 @@ async function submit(e) {
   S.edit = null; S.tab = 'mine'; shell();
 }
 
+// Evento privado (solo personas usuarias): no elige espacios; la administración los asigna al aprobar
+async function privSubmit({a, b, details}) {
+  const ed = S.edit, editAppr = ed?.status === 'approved';
+  const ok = await ask(ed ? (editAppr ? '¿Desea solicitar este cambio?' : '¿Desea guardar los cambios de la solicitud?') : '¿Desea enviar la solicitud de evento privado?',
+    [...when(a, b), 'La fecha aún no está reservada.', 'La administración revisará su solicitud, le asignará el espacio y le responderá por correo.' + (editAppr ? ' Mientras tanto, el evento queda pendiente.' : '')],
+    ed ? (editAppr ? 'Solicitar cambio' : 'Guardar cambios') : 'Enviar solicitud', 'Volver');
+  if (!ok) return;
+  busyText('Enviando su solicitud…');
+  const pf = {user_id: S.user.id, email: S.user.email, full_name: $('#nm').value.trim(), phone: $('#ph').value.trim(), updated_at: new Date().toISOString()};
+  const u = await sb.from('profiles').upsert(pf); if (u.error) return msg(err(u.error), 1);
+  S.profile = pf;
+  const f = {p_purpose: $('#pp').value.trim(), p_attendees: +$('#at').value || null, p_start: a, p_end: b};
+  let r, rid;
+  if (editAppr) { r = await sb.rpc('request_private_change', {p_reservation: ed.id, ...f, p_details: details}); rid = ed.id; }
+  else if (ed) { r = await sb.rpc('update_my_reservation', {p_reservation: ed.id, ...f, p_space_ids: [], p_details: details}); rid = ed.id; }
+  else { r = await sb.rpc('submit_reservation', {...f, p_space_ids: [], p_kind: 'private', p_details: details}); rid = r.data; }
+  if (r.error) return msg(err(r.error), 1);
+  sb.functions.invoke('notify', {body: {reservation_id: rid, event: ed && !editAppr ? 'edited' : 'new'}}).catch(() => {});
+  msg(editAppr ? 'Cambio enviado. El evento quedó pendiente de revisión; la administración le responderá por correo.' : ed ? 'Solicitud actualizada. Sigue pendiente de revisión.' : 'Solicitud enviada. La administración la revisará, le asignará el espacio y le responderá por correo.');
+  S.edit = null; S.tab = 'mine'; shell();
+}
+
 /* ============ 7. MIS RESERVAS ============ */
 async function mineView() {
   const wasOpen = document.querySelector('#view details.hist')?.open; // para no plegar el historial al refrescar
@@ -746,10 +839,11 @@ async function mineView() {
     if (r.status === 'pending') return '<div><button data-act="em" data-id="' + r.id + '">Editar solicitud</button> ' + cancel + '</div>';
     const auto = (r.reservation_items || []).every(i => i.spaces?.requires_approval === false);
     if (new Date(r.starts_at) - Date.now() < 24 * 36e5) return '<div>' + cancel + '</div><small class="muted">Faltan menos de 24 horas: solo puede cancelar.</small>';
+    if (r.kind === 'private') return '<div><button data-act="em" data-id="' + r.id + '">Solicitar cambio</button> ' + cancel + '</div><small class="muted">Un cambio vuelve a revisión de la administración.</small>';
     if (!auto) return '<div>' + cancel + '</div><small class="muted">Para cambiar esta reserva, comuníquese con la administración o cancélela.</small>';
     return '<div><button data-act="em" data-id="' + r.id + '">Editar reserva</button> ' + cancel + '</div>';
   };
-  const card = r => `<div class="card"><span class="tag ${r.status}">${LBL[r.status]}</span>
+  const card = r => `<div class="card"><span class="tag ${r.status}">${LBL[r.status]}</span> ${kindTag(r)}
   <h3>${esc(names(r))}</h3><div>${rango(r)}</div>
   ${r.created_by_admin ? '<small class="muted">Creada por la administración' + (r.on_behalf ? ' a nombre de ' + esc(r.requester_name) + ' (' + esc(r.requester_phone || '') + ')' : '') + '.</small><br>' : ''}
   ${r.was_modified ? '<small>La administración ajustó el horario o los datos solicitados.</small><br>' : ''}
@@ -783,11 +877,12 @@ async function adminView() {
   const op = k => S.open.has(k) ? 'open' : '';
   // Cada reserva: una línea (estado, solicitante, evento, espacios, fecha) que se expande con el detalle y las acciones
   const rc = (r, compact) => `<details class="card rw" data-id="${r.id}" data-k="r:${r.id}" ${op('r:' + r.id)}><summary>
-  <span class="tag ${r.status}">${LBL[r.status]}</span>${compact ? `<b>${esc(diaLargo(r.starts_at))}</b><small class="muted">${horaTxt(r.starts_at, r.ends_at)}</small>` : `<b>${esc(r.requester_name)}</b>
+  <span class="tag ${r.status}">${LBL[r.status]}</span>${kindTag(r)}${compact ? `<b>${esc(diaLargo(r.starts_at))}</b><small class="muted">${horaTxt(r.starts_at, r.ends_at)}</small>` : `<b>${esc(r.requester_name)}</b>
   <span class="rwl">${esc(r.purpose || 'Sin nombre de evento')}</span><span class="rwl">${esc(names(r))}</span>
   <small class="muted">${rango(r)}</small>`}</summary>
   <div class="rwb">
   <div><small>${esc(r.requester_email)}${r.requester_phone ? ' · ' + esc(r.requester_phone) : ''} · ${r.attendees || '?'} personas</small></div>
+  ${r.details ? '<div><small><b>Detalles:</b> ' + esc(r.details) + '</small></div>' : ''}
   ${r.created_by_admin ? '<div><small class="muted">Creada por la administración' + (r.created_by_email ? ' (' + esc(r.created_by_email) + ')' : '') + (r.on_behalf ? ' a nombre de ' + esc(r.requester_name) : '') + '.</small></div>' : ''}
   ${r.auto_approved ? '<div><small class="muted">Aprobada automáticamente (sin intervención de la administración).</small></div>' : ''}${released(r).length ? '<div><small class="muted">Salas liberadas del edificio: ' + esc(released(r).join(', ')) + '</small></div>' : ''}${r.whole_building_id ? '<div><small class="muted">Edificio completo: para liberar salas, desmárquelas en "Cambiar sala o recurso" y pulse ' + (r.status === 'pending' ? 'Aprobar' : 'Guardar cambios') + '.</small></div>' : ''}
   ${r.series_id && r.status === 'approved' ? `<label>¿Qué desea hacer con esta fecha?<select class="ac"><option value="">Elegir una acción…</option><option value="room">Cambiar sala o recurso</option><option value="time">Cambiar hora desde esta fecha</option><option value="one">Cancelar esta fecha</option><option value="from">Cancelar esta y las siguientes</option></select></label>
@@ -797,8 +892,8 @@ async function adminView() {
   <div><button class="go" data-act="sgo" data-id="${r.id}" disabled>Elegir una acción</button></div>` : `<div class="g"><label>Inicio<input type="datetime-local" class="s" value="${loc(r.starts_at)}"></label>
   <label>Fin<input type="datetime-local" class="e" value="${loc(r.ends_at)}"></label>
   <label>Nota para la persona<input class="n" value="${esc(r.admin_note)}"></label></div>
-  ${spacePicker(r)}
-  ${r.status === 'pending' ? '<button data-act="ok">Aprobar</button> <button class="sec" data-act="no">Rechazar</button>'
+  ${r.kind === 'private' && r.status === 'pending' ? assignBox(r) : spacePicker(r)}
+  ${r.status === 'pending' ? '<button data-act="ok">' + (r.kind === 'private' ? 'Aprobar y asignar' : 'Aprobar') + '</button> <button class="sec" data-act="no">Rechazar</button>' + (r.kind === 'private' ? '<br><small class="muted">Al aprobar se enviará copia a la administración zonal.</small>' : '')
     : '<button data-act="ok">Guardar cambios</button> <button class="sec" data-act="no">Cancelar reserva</button>'}`}</div></details>`;
   // Una serie se ve como una sola línea; al abrirla aparecen sus fechas
   const sg = g => { const f = g.series[0], n = g.series.length;
@@ -811,20 +906,34 @@ async function adminView() {
   const pend = list.filter(r => r.status === 'pending'), appr = list.filter(r => r.status === 'approved');
   const seen = new Map(), apprRows = [];
   for (const r of appr) {
-    if (!r.series_id) { apprRows.push(rc(r)); continue; }
+    if (!r.series_id) { apprRows.push({t: new Date(r.starts_at), h: rc(r)}); continue; }
     let g = seen.get(r.series_id);
-    if (!g) { g = {series: []}; seen.set(r.series_id, g); apprRows.push(g); }
+    if (!g) { g = {series: [], t: new Date(r.starts_at)}; seen.set(r.series_id, g); apprRows.push(g); }
     g.series.push(r);
   }
-  const apprHtml = apprRows.map(x => typeof x === 'string' ? x : sg(x));
+  // Pendientes: eventos privados primero (hay que asignarles espacios). Aprobadas: esta semana (hasta el domingo), este mes y futuras, por fecha ascendente
+  const gh = (title, n, cls) => `<div class="gh ${cls || ''}"><b>${title}</b><span class="n">${n}</span></div>`;
+  const pendP = pend.filter(r => r.kind === 'private'), pendG = pend.filter(r => r.kind !== 'private');
+  const pendHtml = !pend.length ? '<p class="muted">No hay solicitudes pendientes.</p>'
+    : (pendP.length ? gh('Eventos privados', pendP.length, 'pr') + '<div class="hint">Requieren que usted asigne los espacios.</div>' + pendP.map(r => rc(r)).join('') : '')
+    + (pendG.length ? (pendP.length ? gh('Actividades de grupos', pendG.length) : '') + pendG.map(r => rc(r)).join('') : '');
+  const wkEnd = new Date(); wkEnd.setHours(23, 59, 59, 999); wkEnd.setDate(wkEnd.getDate() + ((7 - wkEnd.getDay()) % 7));
+  const moEnd = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59, 999);
+  const bucket = x => x.t <= wkEnd ? 0 : x.t <= moEnd ? 1 : 2;
+  const apprHtml = apprRows.map(x => x.h ?? sg(x));
+  const apprBody = !apprRows.length ? '<p class="muted">No hay reservas aprobadas próximas.</p>'
+    : ['Esta semana', 'Este mes', 'Futuras'].map((nm, k) => { const xs = apprRows.filter(x => bucket(x) === k); return xs.length ? gh(nm, xs.length) + xs.map(x => x.h ?? sg(x)).join('') : ''; }).join('');
 
   const sub = (k, t) => `<button data-act="sub" data-s="${k}" class="${S.sub === k ? 'on' : ''}">${t}</button>`;
-  const menu = `<nav class="subnav">${sub('res', 'Reservas' + (pend.length ? ' (' + pend.length + ' pendiente' + (pend.length > 1 ? 's' : '') + ')' : ''))}${sub('esp', 'Espacios')}${sub('blq', 'Bloqueos')}</nav>`;
+  const menu = `<nav class="subnav">${sub('res', 'Reservas' + (pend.length ? ' (' + pend.length + ' pendiente' + (pend.length > 1 ? 's' : '') + ')' : ''))}${sub('esp', 'Espacios')}${sub('blq', 'Bloqueos')}${S.root ? sub('cfg', 'Configuración') : ''}</nav>`;
 
+  if (S.sub === 'cfg' && !S.root) S.sub = 'res';
   let body = '';
-  if (S.sub === 'res') {
-    body = `<h2>Solicitudes pendientes${pend.length ? ' (' + pend.length + ')' : ''}</h2>${pend.map(rc).join('') || '<p class="muted">No hay solicitudes pendientes.</p>'}
-  <h2>Reservas aprobadas próximas${apprHtml.length ? ' (' + apprHtml.length + ')' : ''}</h2>${apprHtml.join('') || '<p class="muted">No hay reservas aprobadas próximas.</p>'}`;
+  if (S.sub === 'cfg') {
+    body = '<div class="card" id="cfgbox">Cargando…</div>';
+  } else if (S.sub === 'res') {
+    body = `<h2>Solicitudes pendientes${pend.length ? ' (' + pend.length + ')' : ''}</h2>${pendHtml}
+  <h2>Reservas aprobadas próximas${apprHtml.length ? ' (' + apprHtml.length + ')' : ''}</h2>${apprBody}`;
   } else if (S.sub === 'esp') {
     // Un bloque plegable por edificio: primero salas y luego recursos, en orden alfabético; lo deshabilitado al final
     const ord = (x, y) => (y.active - x.active) || ((x.kind === 'resource') - (y.kind === 'resource')) || x.name.localeCompare(y.name, 'es');
@@ -862,21 +971,56 @@ async function adminView() {
   })())}</div>`;
   }
   $('#view').innerHTML = menu + body;
+  document.querySelectorAll('details.rw[open] .pick[data-lazy]').forEach(loadAssign);
+  if (S.sub === 'cfg') cfgView();
+}
+// Configuración (solo la cuenta principal): eventos privados, correo de copia y límites de anticipación
+async function cfgView() {
+  const box = $('#cfgbox'); if (!box) return;
+  const q = await sb.rpc('root_settings');
+  if (q.error || !q.data) { box.innerHTML = '<p class="muted">No se pudo cargar la configuración. Si acaba de actualizar la página, confirme que ejecutó la migración 14 en Supabase.</p>'; return; }
+  const c = q.data;
+  box.innerHTML = `<form id="cf"><h2 style="margin-top:0">Eventos privados</h2>
+  <label class="sw"><input type="checkbox" id="cp" ${c.private_enabled ? 'checked' : ''}><b>Eventos privados activados</b></label>
+  <small class="muted">Si los desactiva, la página no pregunta el tipo de actividad y todo funciona como actividad de grupos.</small>
+  <label style="margin-top:10px">Correo que recibe copia al aprobar un evento privado<input type="email" id="cm" value="${esc(c.private_copy_email)}" placeholder="correo@ejemplo.com"></label>
+  <label>Días máximos de anticipación (evento privado)<input type="number" id="cdp" inputmode="numeric" min="1" max="730" step="1" required value="${c.private_max_days}"></label>
+  <label>Días máximos de anticipación (actividad de grupos)<input type="number" id="cdg" inputmode="numeric" min="1" max="365" step="1" required value="${c.group_max_days}"></label>
+  <small class="muted">Los cambios aplican de inmediato a las solicitudes nuevas; las reservas existentes no se modifican. Los administradores no tienen límite de anticipación.</small>
+  <div style="margin-top:10px"><button>Guardar cambios</button></div></form>`;
+  $('#cf').onsubmit = guard('Guardando…', saveCfg);
+}
+async function saveCfg(e) {
+  e.preventDefault();
+  const en = $('#cp').checked, mail = $('#cm').value.trim(), dp = +$('#cdp').value, dg = +$('#cdg').value;
+  if (!Number.isInteger(dp) || dp < 1 || dp > 730) return msg('Los días para eventos privados deben ser un número entre 1 y 730.', 1);
+  if (!Number.isInteger(dg) || dg < 1 || dg > 365) return msg('Los días para actividades de grupos deben ser un número entre 1 y 365.', 1);
+  if ((en || mail) && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) return msg(en ? 'Escriba el correo que recibirá la copia de los eventos privados.' : 'El correo no parece válido.', 1);
+  const q = await sb.rpc('save_settings', {p_enabled: en, p_email: mail, p_private_days: dp, p_group_days: dg});
+  if (q.error) return msg(err(q.error), 1);
+  const c = await sb.rpc('app_config'); if (c.data) S.cfg = {...S.cfg, ...c.data};
+  msg('Configuración guardada.');
 }
 // Recuerda qué filas y bloques están abiertos para no cerrarlos al refrescar la lista
 document.addEventListener('toggle', e => {
   const d = e.target;
   if (d.matches?.('details[data-k]')) { S.open ||= new Set(); d.open ? S.open.add(d.dataset.k) : S.open.delete(d.dataset.k); }
+  if (d.matches?.('details.rw') && d.open) d.querySelectorAll('.pick[data-lazy]').forEach(loadAssign);
 }, true);
+document.addEventListener('change', e => { // al cambiar fecha u hora de un evento privado pendiente se recalcula qué espacios están libres
+  if (e.target.matches?.('.rw .s, .rw .e')) e.target.closest('.card')?.querySelectorAll('.pick[data-lazy]').forEach(loadAssign);
+});
 
 async function decide(btn, kind) {
   const card = btn.closest('.card'), id = card.dataset.id, r = S.res[id];
   const s = card.querySelector('.s') ? iso(card.querySelector('.s').value) : r.starts_at, e = card.querySelector('.e') ? iso(card.querySelector('.e').value) : r.ends_at;
-  let removed = [], swapped = false;
+  let removed = [], swapped = false, firstAssign = false;
   if (kind === 'ok') {
     const sel = [...card.querySelectorAll('.pick input:checked')].map(x => x.value);
+    if (r.kind === 'private' && r.status === 'pending' && !sel.length) return msg('Elija al menos un espacio para aprobar este evento privado.', 1);
     const cur = r.reservation_items.map(i => i.space_id);
     swapped = !(sel.length === cur.length && sel.every(x => cur.includes(x)));
+    firstAssign = r.kind === 'private' && !cur.length; // asignar espacios a un evento privado no es un ajuste a lo solicitado
     // Revisa Google Calendar antes de aprobar: si hay eventos en ese horario, el administrador decide
     const found = await calendarConflicts(id, s, e, sel.length ? sel : cur);
     if (found && found.length && !(await ask('En Google Calendar ya hay eventos en ese horario. ¿Desea aprobar de todos modos?', found, 'Aprobar de todos modos', 'Volver'))) return;
@@ -889,7 +1033,7 @@ async function decide(btn, kind) {
   const up = {admin_note: card.querySelector('.n')?.value || null, decided_by: S.user.id, decided_at: new Date().toISOString()};
   if (kind === 'ok') {
     const changed = new Date(s) - new Date(r.starts_at) || new Date(e) - new Date(r.ends_at);
-    Object.assign(up, {status: 'approved', starts_at: s, ends_at: e, was_modified: r.was_modified || !!changed || (swapped && !r.whole_building_id)});
+    Object.assign(up, {status: 'approved', starts_at: s, ends_at: e, was_modified: r.was_modified || !!changed || (swapped && !r.whole_building_id && !firstAssign)});
   } else up.status = r.status === 'pending' ? 'rejected' : 'cancelled';
   const {error} = await sb.from('reservations').update(up).eq('id', id);
   if (error) return msg(err(error), 1);
@@ -898,7 +1042,8 @@ async function decide(btn, kind) {
   try { const j = f.error ? await f.error.context.json() : f.data; d = (j.detail || [j.error]).filter(Boolean).join('; '); } catch (_) {}
   const n = await sb.functions.invoke('notify', {body: {reservation_id: id, event: 'decision'}});
   const mail = n.error ? ' No se pudo enviar el correo a la persona.' : ' Se avisó por correo a la persona.';
-  msg((f.error ? 'Guardado, pero Google Calendar no se actualizó: ' + d : 'Listo. ' + d) + mail, !!f.error || !!n.error);
+  const zonal = r.kind !== 'private' ? '' : n.data?.zonal === 'enviada' ? ' Se envió copia a la administración zonal.' : n.data?.zonal === 'sin correo' ? ' No hay correo de la administración zonal configurado (Administración > Configuración).' : (n.error || n.data?.zonal === 'error') ? ' No se pudo enviar la copia a la administración zonal.' : '';
+  msg((f.error ? 'Guardado, pero Google Calendar no se actualizó: ' + d : 'Listo. ' + d) + mail + zonal, !!f.error || !!n.error || n.data?.zonal === 'error');
   adminView();
 }
 
