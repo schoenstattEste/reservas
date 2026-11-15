@@ -1100,7 +1100,11 @@ async function saveSpace(e) {
 /* ============ 9. ACCIONES (botones) ============ */
 const acts = {
   google: () => sb.auth.signInWithOAuth({provider: 'google', options: {redirectTo: location.origin + location.pathname}}),
-  out: () => sb.auth.signOut(),
+  out: async () => { // si la sesión quedó dañada, signOut puede fallar sin cerrar nada: se limpia el almacenamiento local y se recarga
+    try { await Promise.race([sb.auth.signOut(), new Promise(r => setTimeout(r, 2500))]); } catch (_) {}
+    try { Object.keys(localStorage).filter(k => /^sb-.*-auth-token/.test(k)).forEach(k => localStorage.removeItem(k)); } catch (_) {}
+    location.reload();
+  },
   again: () => loginView(),
   cxs: b => cancelSeries(b),
   shs: b => shiftSeries(b),
