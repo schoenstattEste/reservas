@@ -314,6 +314,7 @@ function newView() {
   ${S.root && !ed ? '<label id="eml" hidden>Correo de la persona (opcional, para enviarle la confirmación)<input type="email" id="emx" autocomplete="off" placeholder="ejemplo@correo.com"></label>' : ''}
   <div class="g"><label>Fecha<input type="date" id="dt" required min="${loc(new Date()).slice(0, 10)}" ${S.admin ? '' : `max="${loc(new Date(Date.now() + MAXDAYS * 864e5)).slice(0, 10)}"`} value="${sd.slice(0, 10)}"></label><label>Hora de inicio<input type="time" id="t1" required value="${sd.slice(11, 16)}"></label>
   <label>Hora de fin<input type="time" id="t2" required value="${ee.slice(11, 16)}"></label><label>Cantidad de asistentes<input type="number" id="at" inputmode="numeric" min="1" step="1" placeholder="ej. 12" ${S.admin ? '' : 'required'} value="${ed?.attendees ?? ''}"></label></div>
+  ${S.admin ? '' : `<small class="muted" style="display:block;font-size:.78rem;margin:-4px 0 8px">Puede reservar con hasta ${MAXDAYS} días de anticipación (hasta el ${new Date(Date.now() + MAXDAYS * 864e5).toLocaleDateString('es-CR', { day: 'numeric', month: 'long', year: 'numeric' })}).</small>`}
   ${S.root && !ed ? `<div class="rpb"><label class="obh"><input type="checkbox" id="rp"> <b>Repetir esta reserva</b></label>
   <div class="g" id="rpf" hidden><label>Se repite<select id="re"><option value="1">Cada semana</option><option value="2">Cada 2 semanas</option></select></label>
   <label>Hasta el<input type="date" id="ru"></label></div>
@@ -326,6 +327,7 @@ function newView() {
   <div class="sumbar" id="sumbar" hidden><div class="sum"><small>Seleccionado</small><b id="sumtxt">Aún no ha elegido ninguna</b><span id="summsg" class="muted">Elija una o más salas o recursos.</span></div>
   <div><button id="go">${ed ? 'Guardar cambios' : 'Continuar'}</button>${ed ? ' <button type="button" class="sec" data-act="tab" data-t="mine">Volver sin guardar</button>' : ''}</div></div></form>`;
   S.showNA = false; S.av = null;
+  if (!S.admin) { const dd = $('#dt'); dd.addEventListener('input', () => dd.setCustomValidity(dd.value && dd.max && dd.value > dd.max ? ERR.too_far : '')); }
   // Nombre del evento: de EVMIN a EVMAX caracteres (sin contar espacios sobrantes), con contador
   const pp = $('#pp'), nameCheck = () => {
     const n = pp.value.trim().length;
