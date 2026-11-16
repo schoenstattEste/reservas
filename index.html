@@ -235,7 +235,7 @@ const spacePicker = r => {
 const spacePickBody = r => {
   const cur = new Set((r.reservation_items || []).map(i => i.space_id));
   return `<div class="pick">${S.spaces.filter(s => s.active || cur.has(s.id)).map(s =>
-    `<label class="chip"><input type="checkbox" value="${s.id}" ${cur.has(s.id) ? 'checked' : ''}>${esc(s.name)}${s.capacity ? ' (' + s.capacity + ' pers.)' : ''}</label>`).join('')}</div>
+    `<label class="chip"><input type="checkbox" value="${s.id}" ${cur.has(s.id) ? 'checked' : ''}>${esc(s.name)}${s.kind === 'room' && s.capacity ? ' (' + s.capacity + ' pers.)' : ''}</label>`).join('')}</div>
     <small class="muted">Marque lo que quedará en la reserva y pulse ${r.status === 'pending' ? 'Aprobar' : 'Guardar cambios'}. El nuevo espacio debe estar libre en ese horario.</small>`;
 };
 // Evento privado pendiente: la administración elige los espacios entre los que están libres en ese horario
@@ -250,7 +250,7 @@ async function loadAssign(box) {
   const act = S.spaces.filter(x => x.active);
   const st = await Promise.all(act.map(x => sb.rpc('check_availability_for', {p_space: x.id, p_start: s, p_end: e, p_exclude: id}).then(q => q.data)));
   box.innerHTML = act.map((x, i) => { const ok = st[i] === 'available';
-    return `<label class="chip ${ok ? '' : 'na'}"><input type="checkbox" value="${x.id}" ${ok && keep.has(x.id) ? 'checked' : ''} ${ok ? '' : 'disabled'}>${esc(x.name)}${x.capacity ? ' (' + x.capacity + ' pers.)' : ''}${ok ? '' : ' — no disponible'}</label>`; }).join('')
+    return `<label class="chip ${ok ? '' : 'na'}"><input type="checkbox" value="${x.id}" ${ok && keep.has(x.id) ? 'checked' : ''} ${ok ? '' : 'disabled'}>${esc(x.name)}${x.kind === 'room' && x.capacity ? ' (' + x.capacity + ' pers.)' : ''}${ok ? '' : ' — no disponible'}</label>`; }).join('')
     || '<small class="muted">No hay espacios habilitados.</small>';
 }
 const feats = s => { const f = (s.space_features || []).map(x => x.features.name + (x.detail ? ' ' + x.detail : '')).join(', '); return f ? ' · ' + esc(f) : ''; };
@@ -492,7 +492,7 @@ function renderAvail() {
     const off = unavailable || blockedByRule || locked;
     if (off && !locked && !S.showNA) { hiddenN++; return ''; }
     const checked = !blockedByRule && !unavailable && keep.has(s.id) || locked;
-    const meta = [s.capacity ? s.capacity + ' personas' : '', esc(featText(s))].filter(Boolean).join(' · ');
+    const meta = [s.kind === 'room' && s.capacity ? s.capacity + ' personas' : '', s.kind === 'resource' ? esc([s.brand, s.model].filter(Boolean).join(' ')) : '', esc(featText(s))].filter(Boolean).join(' · ');
     const badge = unavailable ? '<span class="bdg grey">No disponible</span>' : blockedByRule ? '<span class="bdg grey">Requiere solicitud nueva</span>'
       : needs ? '<span class="bdg appr">Con aprobación</span>' : '<span class="bdg fast">Inmediata</span>';
     return `<label class="tile ${off && !locked ? 'na' : ''}"><input type="checkbox" name="sp" value="${s.id}" data-b="${s.kind === 'room' ? (s.building_id || '') : ''}" data-off="${off ? 1 : 0}" ${off ? 'disabled' : ''} ${checked ? 'checked' : ''}>${CHK}
@@ -937,7 +937,7 @@ async function adminView() {
     : ['Esta semana', 'Este mes', 'Futuras'].map((nm, k) => { const xs = apprRows.filter(x => bucket(x) === k); return xs.length ? gh(nm, xs.length) + xs.map(x => x.h ?? sg(x)).join('') : ''; }).join('');
 
   const sub = (k, t) => `<button data-act="sub" data-s="${k}" class="${S.sub === k ? 'on' : ''}">${t}</button>`;
-  const menu = `<nav class="subnav">${sub('res', 'Reservas' + (pend.length ? ' (' + pend.length + ' pendiente' + (pend.length > 1 ? 's' : '') + ')' : ''))}${sub('esp', 'Espacios')}${sub('blq', 'Bloqueos')}${S.root ? sub('cfg', 'Configuración') : ''}</nav>`;
+  const menu = `<nav class="subnav">${sub('res', 'Reservas' + (pend.length ? ' (' + pend.length + ' pendiente' + (pend.length > 1 ? 's' : '') + ')' : ''))}${sub('esp', 'Áreas y recursos')}${sub('blq', 'Bloqueos')}${S.root ? sub('cfg', 'Configuración') : ''}</nav>`;
 
   if (S.sub === 'cfg' && !S.root) S.sub = 'res';
   let body = '';
@@ -949,7 +949,8 @@ async function adminView() {
   } else if (S.sub === 'esp') {
     // Un bloque plegable por edificio: primero salas y luego recursos, en orden alfabético; lo deshabilitado al final
     const ord = (x, y) => (y.active - x.active) || ((x.kind === 'resource') - (y.kind === 'resource')) || x.name.localeCompare(y.name, 'es');
-    const spRow = s => `<div class="row ${s.active ? '' : 'off'}"><b>${esc(s.name)}</b><small>${s.kind === 'room' ? 'Sala' : 'Recurso'}${feats(s)} · ${s.requires_approval === false ? 'Aprobación automática' : 'Requiere aprobación'}</small>
+    const bname = id => S.buildings.find(b => b.id === id)?.name || '';
+    const spRow = s => `<div class="row ${s.active ? '' : 'off'}"><b>${esc(s.name)}</b><small>${s.kind === 'room' ? 'Sala' : 'Recurso' + (bname(s.building_id) ? ' · ' + esc(bname(s.building_id)) : '')}${s.kind === 'resource' ? esc([[s.brand, s.model].filter(Boolean).join(' '), s.serial_number ? 'Serie ' + s.serial_number : '', s.asset_number ? 'Activo ' + s.asset_number : ''].filter(Boolean).map(x => ' · ' + x).join('')) : ''}${feats(s)} · ${s.requires_approval === false ? 'Aprobación automática' : 'Requiere aprobación'}</small>
   <span class="tag ${s.active ? 'available' : 'inactive'}">${s.active ? 'Habilitado' : 'Deshabilitado'}</span>
   <button class="sec" data-act="ed" data-id="${s.id}">Editar</button></div>`;
     const grp = (k, title, items) => {
@@ -958,14 +959,18 @@ async function adminView() {
       return `<details class="card bg" data-k="g:${k}" ${op('g:' + k)}><summary><b>${esc(title)}</b><small class="muted">${sum}</small></summary>${[...items].sort(ord).map(spRow).join('') || '<p class="muted">Sin espacios.</p>'}</details>`;
     };
     const known = new Set(S.buildings.map(b => b.id));
-    const groups = [...S.buildings].sort((x, y) => x.name.localeCompare(y.name, 'es')).map(b => grp(b.id, b.name, S.spaces.filter(s => s.building_id === b.id)));
-    const loose = S.spaces.filter(s => !known.has(s.building_id));
+    const rooms = S.spaces.filter(s => s.kind === 'room');
+    const groups = [...S.buildings].sort((x, y) => x.name.localeCompare(y.name, 'es')).map(b => grp(b.id, b.name, rooms.filter(s => s.building_id === b.id)));
+    const loose = rooms.filter(s => !known.has(s.building_id));
     if (loose.length) groups.push(grp('none', 'Otras áreas', loose));
+    // Los recursos van aparte, en una categoría propia (orden natural: #1, #2, #10)
+    const resAll = S.spaces.filter(s => s.kind === 'resource');
+    groups.push(`<details class="card bg" data-k="g:res" ${op('g:res')}><summary><b>Recursos</b><small class="muted">${resAll.length} ${resAll.length === 1 ? 'recurso' : 'recursos'}</small></summary>${[...resAll].sort((x, y) => (y.active - x.active) || x.name.localeCompare(y.name, 'es', {numeric: true})).map(spRow).join('') || '<p class="muted">Aún no hay recursos.</p>'}</details>`);
     body = `<div class="card"><h2>Edificios</h2>
-  ${S.buildings.map(b => `<div class="row"><b>${esc(b.name)}</b><small>${b.allow_whole ? 'Se puede reservar completo' : 'No se reserva completo'} · ${S.spaces.filter(s => s.building_id === b.id).length} espacios${b.google_calendar_id ? ' · con calendario resumen' : ''}</small>
+  ${S.buildings.map(b => `<div class="row"><b>${esc(b.name)}</b><small>${b.allow_whole ? 'Se puede reservar completo' : 'No se reserva completo'} · ${(n => n + (n === 1 ? ' sala' : ' salas'))(S.spaces.filter(s => s.kind === 'room' && s.building_id === b.id).length)}${b.google_calendar_id ? ' · con calendario resumen' : ''}</small>
   <button class="sec" data-act="eb" data-id="${b.id}">Editar</button> <button class="sec" data-act="bx" data-id="${b.id}">Eliminar</button></div>`).join('') || '<p class="muted">Aún no hay edificios.</p>'}
   <br><button data-act="eb" data-id="new">Agregar edificio</button><div id="bef"></div></div>
-  <h2 class="hd">Salas y recursos <button data-act="ed" data-id="new">Agregar sala o recurso</button></h2><div id="ef"></div>
+  <h2 class="hd">Áreas y recursos <button data-act="ed" data-id="new">Agregar sala o recurso</button></h2><div id="ef"></div>
   ${groups.join('')}`;
   } else {
     body = `<div class="card"><h2>Bloqueos por periodo</h2>
@@ -1059,24 +1064,42 @@ async function decide(btn, kind) {
   adminView();
 }
 
+// ¿Existen las columnas nuevas de recursos (migración 15)? Si no, el formulario funciona como antes
+const hasAC = () => S.spaces.length > 0 && 'brand' in S.spaces[0];
 function editSpace(id) {
+  const AC = hasAC();
   const s = S.spaces.find(x => x.id === id) || {active: true, kind: 'room', requires_approval: true, space_features: []};
   const have = new Set(s.space_features.map(x => x.feature_id));
   $('#ef').innerHTML = `<form id="sf" class="card" data-id="${s.id || ''}"><div class="g">
   <label>Nombre<input id="sn" required value="${esc(s.name)}"></label>
   <label>Tipo<select id="sk"><option value="room" ${s.kind === 'room' ? 'selected' : ''}>Sala</option><option value="resource" ${s.kind === 'resource' ? 'selected' : ''}>Recurso</option></select></label>
-  <label>Capacidad<input id="sc" type="number" value="${s.capacity ?? ''}"></label>
-  <label>Edificio<select id="sb"><option value="">Sin edificio</option>${S.buildings.map(b => `<option value="${b.id}" ${s.building_id === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></label></div>
+  <label id="scl">Capacidad (personas)<input id="sc" type="number" min="1" value="${s.capacity ?? ''}"></label>
+  <label><span id="sbl">Edificio</span><select id="sb"><option value="">Sin edificio</option>${S.buildings.map(b => `<option value="${b.id}" ${s.building_id === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></label></div>
   <label>ID del calendario de Google<input id="sg" value="${esc(s.google_calendar_id)}"></label>
   <label>Descripción<input id="sd" value="${esc(s.description)}"></label>
+  ${AC ? `<div id="rsf"><div class="g"><label>Marca (opcional)<input id="sbr" maxlength="60" value="${esc(s.brand)}"></label><label>Modelo (opcional)<input id="smo" maxlength="60" value="${esc(s.model)}"></label>
+  <label>Número de serie (opcional)<input id="ssn" maxlength="60" value="${esc(s.serial_number)}"></label><label>Número de activo (opcional)<input id="san" maxlength="60" value="${esc(s.asset_number)}"></label></div>
+  <small class="muted">La marca y el modelo los ve también quien reserva; el número de serie y el de activo solo la administración.</small></div>` : ''}
   <label><input type="checkbox" id="sa" ${s.active ? 'checked' : ''}>Habilitado para reservas</label>
   <label><input type="checkbox" id="sr" ${s.requires_approval === false ? 'checked' : ''}>Se aprueba automáticamente (si no, cada solicitud espera la decisión de la administración)</label>
   <div>${S.features.map(f => `<label class="chip"><input type="checkbox" name="ft" value="${f.id}" ${have.has(f.id) ? 'checked' : ''}>${esc(f.name)}</label>`).join('')}</div>
-  <label>Agregar característica nueva<input id="nf" placeholder="Ej. Pizarra"></label><button>Guardar cambios</button>${s.id ? ' <button type="button" class="sec" data-act="sx" data-id="' + s.id + '">Eliminar este espacio</button>' : ''}</form>`;
+  <label>Agregar característica nueva<input id="nf" placeholder="Ej. Pizarra"></label><button>Guardar cambios</button> <button type="button" class="sec" id="scx">Cancelar</button>${s.id ? ' <button type="button" class="sec" data-act="sx" data-id="' + s.id + '">Eliminar este espacio</button>' : ''}</form>`;
   $('#ef').scrollIntoView({block: 'nearest', behavior: 'smooth'});
   $('#sf').onsubmit = guard('Guardando…', saveSpace);
+  const kindSync = () => { const rs = $('#sk').value === 'resource'; $('#scl').hidden = rs; if ($('#rsf')) $('#rsf').hidden = !rs; $('#sbl').textContent = rs ? 'Ubicación habitual' : 'Edificio'; };
+  $('#sk').addEventListener('change', kindSync); kindSync();
+  closeForm('#sf', '#ef', 'scx');
   if (!s.id) $('#sk').onchange = () => { $('#sr').checked = $('#sk').value === 'resource'; }; // espacio nuevo: los recursos nacen con aprobación automática
   if (!s.id) $('#sr').checked = false;
+}
+// Botón Cancelar de los formularios de edición: si hay cambios sin guardar, pregunta antes de descartarlos
+function closeForm(form, box, btn) {
+  const f = $(form); let dirty = false;
+  f.addEventListener('input', () => { dirty = true; }); f.addEventListener('change', () => { dirty = true; });
+  $('#' + btn).onclick = async () => {
+    if (dirty && !(await ask('Hay cambios sin guardar. ¿Desea descartarlos?', [], 'Descartar', 'Seguir editando'))) return;
+    $(box).innerHTML = '';
+  };
 }
 function editBuilding(id) {
   const b = S.buildings.find(x => x.id === id) || {allow_whole: false};
@@ -1084,8 +1107,9 @@ function editBuilding(id) {
   <label>Nombre<input id="bn" required value="${esc(b.name)}"></label>
   <label>ID del calendario resumen de Google (opcional)<input id="bg" value="${esc(b.google_calendar_id)}"></label></div>
   <label><input type="checkbox" id="bw" ${b.allow_whole ? 'checked' : ''}>Se puede reservar el edificio completo (incluye todas sus salas; siempre requiere aprobación)</label>
-  <button>Guardar</button></form>`;
+  <button>Guardar</button> <button type="button" class="sec" id="bcx">Cancelar</button></form>`;
   $('#bf').onsubmit = guard('Guardando…', saveBuilding);
+  closeForm('#bf', '#bef', 'bcx');
 }
 async function saveBuilding(e) {
   e.preventDefault();
@@ -1097,9 +1121,12 @@ async function saveBuilding(e) {
 }
 async function saveSpace(e) {
   e.preventDefault();
+  const AC = hasAC();
   const id = e.target.dataset.id;
-  const row = {name: $('#sn').value.trim(), kind: $('#sk').value, capacity: +$('#sc').value || null, google_calendar_id: $('#sg').value.trim() || null,
+  const isRes = $('#sk').value === 'resource';
+  const row = {name: $('#sn').value.trim(), kind: $('#sk').value, capacity: isRes ? null : (+$('#sc').value || null), google_calendar_id: $('#sg').value.trim() || null,
     description: $('#sd').value.trim() || null, active: $('#sa').checked, requires_approval: !$('#sr').checked, building_id: $('#sb').value || null};
+  if (AC) Object.assign(row, {brand: isRes ? $('#sbr').value.trim() || null : null, model: isRes ? $('#smo').value.trim() || null : null, serial_number: isRes ? $('#ssn').value.trim() || null : null, asset_number: isRes ? $('#san').value.trim() || null : null});
   const r = id ? await sb.from('spaces').update(row).eq('id', id).select().single() : await sb.from('spaces').insert(row).select().single();
   if (r.error) return msg(err(r.error), 1);
   const fids = [...document.querySelectorAll('[name=ft]:checked')].map(x => +x.value), nf = $('#nf').value.trim();
