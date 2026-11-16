@@ -53,7 +53,7 @@ button.wn{background:var(--bad);border-color:var(--bad);color:#fff}.ap[hidden]{d
 .ico.ok{background:var(--ok)}.ico.bad{background:var(--bad)}.ovb .da.c{justify-content:center}
 /* Lista de salas y recursos en la solicitud: tarjetas agrupadas */
 .obh{display:flex;align-items:center;gap:8px;font-size:1.05rem;margin-bottom:2px}.obh input{width:22px;height:22px;flex:none;margin:0}.obn{margin:0 0 10px}
-.hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.hd #navlink{font-weight:400;font-size:.88rem}
+.hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.hd #navlink{font-weight:400;font-size:.88rem}h2.hd button{font-size:1rem;font-weight:400}
 .sec-h{display:flex;align-items:baseline;gap:8px;margin:20px 0 8px}.sec-h h4{margin:0;font-size:1.02rem;color:var(--ac)}
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
 .tile{position:relative;display:flex;flex-direction:column;gap:4px;margin:0;padding:12px;min-height:92px;background:var(--card);border:1.5px solid var(--line);border-radius:10px;color:var(--ink);font-size:1rem}
@@ -112,7 +112,7 @@ input[type=radio]{display:inline-block;width:auto;margin:0}
 .gh{display:flex;align-items:center;gap:8px;margin:14px 0 6px;font-size:1rem}.gh .n{font-size:.75rem;font-weight:700;padding:1px 8px;border-radius:99px;background:var(--line);color:var(--ink)}
 .gh.pr{padding-left:8px;border-left:5px solid var(--gold)}.hint{font-size:.78rem;color:var(--mut);margin:-2px 0 6px}
 .chip.na{opacity:.55}.assign .chip.na{display:block;margin:0 0 8px}.assign{margin:8px 0}
-label.sw{display:flex;align-items:center;gap:10px;color:var(--ink);font-size:1rem}
+label.sw{display:flex;align-items:flex-start;gap:10px;color:var(--ink);font-size:1rem;margin:10px 0 4px;cursor:pointer}label.sw>span,label.sw>b{padding-top:2px}.swh{display:block;margin:0 0 10px 54px;font-size:.78rem}
 .sw input{appearance:none;-webkit-appearance:none;width:44px;height:26px;margin:0;border-radius:99px;background:var(--line);position:relative;cursor:pointer;flex:none;border:0;padding:0}
 .sw input::after{content:'';position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .15s}
 .sw input:checked{background:var(--ok)}.sw input:checked::after{left:21px}
@@ -356,7 +356,7 @@ function newView() {
   const p = S.profile || {}, ed = S.edit, sd = ed ? loc(ed.starts_at) : '', ee = ed ? loc(ed.ends_at) : '';
   $('#view').innerHTML = `<form id="f" class="card"><h2>${ed ? (ed.status === 'approved' ? (ed.kind === 'private' ? 'Solicitar cambio' : 'Editar reserva') : 'Editar solicitud') : 'Nueva solicitud'}</h2>
   ${ed?.kind === 'private' && ed.status === 'approved' ? '<p class="muted"><small>Un cambio en un evento privado aprobado vuelve a revisión de la administración. Hasta que se apruebe de nuevo, el evento queda pendiente.</small></p>' : ''}
-  ${S.root && !ed ? `<label class="obh"><input type="checkbox" id="ob"> <b>Crear en nombre de otra persona</b></label>
+  ${S.root && !ed ? `<label class="sw"><input type="checkbox" id="ob" role="switch"><b>Crear en nombre de otra persona</b></label>
   <p class="muted obn" id="obn"><small>Como administrador, esta reserva queda aprobada de inmediato, en cualquier sala o recurso.</small></p>` : ''}
   ${S.admin && !S.root && !ed ? '<p class="muted"><small>Como administrador, esta reserva queda aprobada de inmediato, en cualquier sala o recurso.</small></p>' : ''}
   <p class="reqn"><b>*</b> Campo obligatorio</p>
@@ -374,7 +374,7 @@ function newView() {
   <label>Hora de fin<input type="time" id="t2" required value="${ee.slice(11, 16)}"></label></div>
   <small class="muted" id="dtlhelp" hidden style="display:block;font-size:.78rem;margin:-4px 0 8px">Incluya en el horario el tiempo que necesita para el montaje y el desmontaje del evento.</small>
   ${S.admin ? '' : `<small class="muted" id="dnote" style="display:block;font-size:.78rem;margin:-4px 0 8px">${dnoteText(ed?.kind || 'group')}</small>`}
-  ${S.root && !ed ? `<div class="rpb"><label class="obh"><input type="checkbox" id="rp"> <b>Repetir esta reserva</b></label>
+  ${S.root && !ed ? `<div class="rpb"><label class="sw"><input type="checkbox" id="rp" role="switch"><b>Repetir esta reserva</b></label>
   <div class="g" id="rpf" hidden><label>Se repite<select id="re"><option value="1">Cada semana</option><option value="2">Cada 2 semanas</option></select></label>
   <label>Hasta el<input type="date" id="ru"></label></div>
   <p class="muted" id="rpn" hidden><small>Se repite el mismo día de la semana y a la misma hora. Abajo se muestra la disponibilidad de la primera fecha; las demás se revisan al continuar y las que choquen se omiten.</small></p></div>` : ''}
@@ -988,11 +988,11 @@ async function adminView() {
     // Los recursos van aparte, en una categoría propia (orden natural: #1, #2, #10)
     const resAll = S.spaces.filter(s => s.kind === 'resource');
     groups.push(`<details class="card bg" data-k="g:res" ${op('g:res')}><summary><b>Recursos</b><small class="muted">${resAll.length} ${resAll.length === 1 ? 'recurso' : 'recursos'}</small></summary>${[...resAll].sort((x, y) => (y.active - x.active) || x.name.localeCompare(y.name, 'es', {numeric: true})).map(spRow).join('') || '<p class="muted">Aún no hay recursos.</p>'}</details>`);
-    body = `<div class="card"><h2>Edificios</h2>
+    body = `<div class="card"><h2 class="hd">Edificios <button data-act="eb" data-id="new">Agregar</button></h2><div id="bef"></div>
   ${S.buildings.map(b => `<div class="row"><b>${esc(b.name)}</b><small>${b.allow_whole ? 'Se puede reservar completo' : 'No se reserva completo'} · ${(n => n + (n === 1 ? ' sala' : ' salas'))(S.spaces.filter(s => s.kind === 'room' && s.building_id === b.id).length)}${b.google_calendar_id ? ' · con calendario resumen' : ''}</small>
   <button class="sec" data-act="eb" data-id="${b.id}">Editar</button> <button class="sec" data-act="bx" data-id="${b.id}">Eliminar</button></div>`).join('') || '<p class="muted">Aún no hay edificios.</p>'}
-  <br><button data-act="eb" data-id="new">Agregar edificio</button><div id="bef"></div></div>
-  <h2 class="hd">Áreas y recursos <button data-act="ed" data-id="new">Agregar sala o recurso</button></h2><div id="ef"></div>
+  </div>
+  <h2 class="hd">Áreas y recursos <button data-act="ed" data-id="new">Agregar</button></h2><div id="ef"></div>
   ${groups.join('')}`;
   } else {
     body = `<div class="card"><h2>Bloqueos por periodo</h2>
@@ -1020,8 +1020,8 @@ async function cfgView() {
   if (q.error || !q.data) { box.innerHTML = '<p class="muted">No se pudo cargar la configuración. Si acaba de actualizar la página, confirme que ejecutó la migración 14 en Supabase.</p>'; return; }
   const c = q.data;
   box.innerHTML = `<form id="cf"><h2 style="margin-top:0">Eventos privados</h2>
-  <label class="sw"><input type="checkbox" id="cp" ${c.private_enabled ? 'checked' : ''}><b>Eventos privados activados</b></label>
-  <small class="muted">Si los desactiva, la página no pregunta el tipo de actividad y todo funciona como actividad de grupos.</small>
+  <label class="sw"><input type="checkbox" id="cp" role="switch" ${c.private_enabled ? 'checked' : ''}><b>Eventos privados</b></label>
+  <small class="muted swh">Si los desactiva, la página no pregunta el tipo de actividad y todo funciona como actividad de grupos.</small>
   <label style="margin-top:10px">Correo que recibe copia al aprobar un evento privado<input type="email" id="cm" value="${esc(c.private_copy_email)}" placeholder="correo@ejemplo.com"></label>
   <label>Días máximos de anticipación (evento privado)<input type="number" id="cdp" inputmode="numeric" min="1" max="730" step="1" required value="${c.private_max_days}"></label>
   <label>Días máximos de anticipación (actividad de grupos)<input type="number" id="cdg" inputmode="numeric" min="1" max="365" step="1" required value="${c.group_max_days}"></label>
@@ -1102,8 +1102,10 @@ function editSpace(id) {
   ${AC ? `<div id="rsf"><div class="g"><label>Marca (opcional)<input id="sbr" maxlength="60" value="${esc(s.brand)}"></label><label>Modelo (opcional)<input id="smo" maxlength="60" value="${esc(s.model)}"></label>
   <label>Número de serie (opcional)<input id="ssn" maxlength="60" value="${esc(s.serial_number)}"></label><label>Número de activo (opcional)<input id="san" maxlength="60" value="${esc(s.asset_number)}"></label></div>
   <small class="muted">La marca y el modelo los ve también quien reserva; el número de serie y el de activo solo la administración.</small></div>` : ''}
-  <label><input type="checkbox" id="sa" ${s.active ? 'checked' : ''}>Habilitado para reservas</label>
-  <label><input type="checkbox" id="sr" ${s.requires_approval === false ? 'checked' : ''}>Se aprueba automáticamente (si no, cada solicitud espera la decisión de la administración)</label>
+  <label class="sw"><input type="checkbox" id="sa" role="switch" ${s.active ? 'checked' : ''}><span>Habilitado</span></label>
+  <small class="muted swh">Si lo desactiva (por ejemplo, un equipo en mantenimiento), no se puede reservar.</small>
+  <label class="sw"><input type="checkbox" id="sr" role="switch" ${s.requires_approval === false ? 'checked' : ''}><span>Aprobación automática</span></label>
+  <small class="muted swh">Activada: la reserva se aprueba al instante. Desactivada: cada solicitud espera la decisión de la administración.</small>
   <div>${S.features.map(f => `<label class="chip"><input type="checkbox" name="ft" value="${f.id}" ${have.has(f.id) ? 'checked' : ''}>${esc(f.name)}</label>`).join('')}</div>
   <label>Agregar característica nueva<input id="nf" placeholder="Ej. Pizarra"></label><button>Guardar cambios</button> <button type="button" class="sec" id="scx">Cancelar</button>${s.id ? ' <button type="button" class="sec" data-act="sx" data-id="' + s.id + '">Eliminar este espacio</button>' : ''}</form>`;
   $('#ef').scrollIntoView({block: 'nearest', behavior: 'smooth'});
@@ -1128,7 +1130,8 @@ function editBuilding(id) {
   $('#bef').innerHTML = `<form id="bf" class="card" data-id="${b.id || ''}"><div class="g">
   <label>Nombre<input id="bn" required value="${esc(b.name)}"></label>
   <label>ID del calendario resumen de Google (opcional)<input id="bg" value="${esc(b.google_calendar_id)}"></label></div>
-  <label><input type="checkbox" id="bw" ${b.allow_whole ? 'checked' : ''}>Se puede reservar el edificio completo (incluye todas sus salas; siempre requiere aprobación)</label>
+  <label class="sw"><input type="checkbox" id="bw" role="switch" ${b.allow_whole ? 'checked' : ''}><span>Reservar edificio completo</span></label>
+  <small class="muted swh">Incluye todas sus salas y siempre requiere aprobación.</small>
   <button>Guardar</button> <button type="button" class="sec" id="bcx">Cancelar</button></form>`;
   $('#bf').onsubmit = guard('Guardando…', saveBuilding);
   closeForm('#bf', '#bef', 'bcx');
