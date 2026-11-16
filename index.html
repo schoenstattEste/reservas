@@ -100,7 +100,7 @@ details.bg{padding-top:8px;padding-bottom:8px}details.bg[open]>summary{margin-bo
 .logo-sm{width:32px;height:32px;object-fit:contain;vertical-align:middle;margin-right:8px}
 @media(prefers-color-scheme:dark){.brand img,.logo-sm{background:#fff;border-radius:12px;padding:4px}}
 input[type=radio]{display:inline-block;width:auto;margin:0}
-.gx{margin:6px 0 10px}.gx .q{display:block;margin-bottom:6px;font-size:.9rem;color:var(--mut)}.gx .q b{color:var(--bad)}.gx .opts{display:grid;grid-template-columns:1fr;gap:8px}
+.gx{margin:6px 0 10px}.gx .q{display:block;margin-bottom:6px;font-size:.9rem;color:var(--mut)}.gx .q b{color:var(--bad)}.rq{color:var(--bad);font-weight:700;margin-left:3px}.reqn{font-size:.78rem;color:var(--mut);margin:0 0 8px}.reqn b{color:var(--bad)}.gx .opts{display:grid;grid-template-columns:1fr;gap:8px}
 .gx .o{display:grid;grid-template-columns:auto 1fr;column-gap:10px;align-items:center;margin:0;padding:10px 12px;border:1.5px solid var(--line);border-radius:12px;background:var(--card);cursor:pointer;line-height:1.25;color:var(--ink)}
 .gx .o input{grid-row:1/3;width:20px;height:20px;accent-color:var(--ac)}.gx .o strong{font-size:1rem}.gx .o span{font-size:.8rem;color:var(--mut)}
 .gx .o:has(input:checked){border-color:var(--gold);box-shadow:0 0 0 2px color-mix(in srgb,var(--gold) 30%,transparent);background:color-mix(in srgb,var(--gold) 10%,var(--card))}
@@ -347,6 +347,7 @@ function newView() {
   ${S.root && !ed ? `<label class="obh"><input type="checkbox" id="ob"> <b>Crear en nombre de otra persona</b></label>
   <p class="muted obn" id="obn"><small>Como administrador, esta reserva queda aprobada de inmediato, en cualquier sala o recurso.</small></p>` : ''}
   ${S.admin && !S.root && !ed ? '<p class="muted"><small>Como administrador, esta reserva queda aprobada de inmediato, en cualquier sala o recurso.</small></p>' : ''}
+  <p class="reqn"><b>*</b> Campo obligatorio</p>
   <div class="g"><label><span id="nml">Nombre completo</span><input id="nm" required value="${esc(p.full_name)}"></label>
   <label>Teléfono<input id="ph" required value="${esc(p.phone)}"></label></div>
   ${S.root && !ed ? '<label id="eml" hidden>Correo de la persona (opcional, para enviarle la confirmación)<input type="email" id="emx" autocomplete="off" placeholder="ejemplo@correo.com"></label>' : ''}
@@ -361,7 +362,7 @@ function newView() {
   <label class="o"><input type="radio" name="kind" value="group" ${S.admin ? 'checked' : 'required'}><strong>Actividad de grupos</strong><span>Reunión, vinculación, formación, taller u otra actividad propia</span></label>
   <label class="o"><input type="radio" name="kind" value="private"><strong>Evento privado</strong><span>Cumpleaños, bodas u otros eventos que no son de grupos Schoenstatt</span></label></div>
   <div class="nt" id="pvnote" hidden><b>La fecha aún no está reservada.</b> La administración revisará su solicitud, le asignará el espacio y le responderá por correo.</div></div>` : ''}
-  <label>Nombre del evento<input id="pp" required maxlength="${EVMAX}" placeholder="ej. Reunión grupo G-66" autocomplete="off" value="${esc(ed?.purpose)}">
+  <label><span id="ppl">Nombre de la actividad</span><input id="pp" required maxlength="${EVMAX}" placeholder="ej. Reunión grupo G-66" autocomplete="off" value="${esc(ed?.purpose)}">
   <span style="display:flex;justify-content:space-between;gap:10px;margin-top:2px"><small class="muted" id="phelp" style="font-size:.7rem">Escriba qué actividad es y qué grupo la realiza.</small><small id="pcnt" class="muted" style="font-size:.7rem;white-space:nowrap"></small></span></label>
   <label id="dtlbox" hidden>Detalles o necesidades (opcional)<textarea id="dtl" rows="3" maxlength="500" placeholder="ej. Salón grande, montaje de mesas, uso de cocina…">${esc(ed?.details)}</textarea></label>
   <div id="grpbox"><h3 class="hd">Salas y recursos <button type="button" class="lnk" id="mapbtn" aria-expanded="false" aria-controls="mapbox" hidden>Ver mapa de la propiedad</button><span id="navlink"></span></h3>
@@ -373,12 +374,23 @@ function newView() {
   <div class="sumbar"><div class="sum"><b>Evento privado</b><span class="wait">Su solicitud pasará a revisión de la administración.</span></div>
   <div><button id="gop">${ed ? (ed.status === 'approved' ? 'Solicitar cambio' : 'Guardar cambios') : 'Enviar solicitud'}</button>${ed ? ' <button type="button" class="sec" data-act="tab" data-t="mine">Volver sin guardar</button>' : ''}</div></div></div></form>`;
   S.showNA = false; S.av = null;
+  // Marca roja (*) junto al título de cada campo obligatorio; se recalcula si un campo cambia de obligatorio a opcional
+  const star = () => document.querySelectorAll('#f label').forEach(l => {
+    l.querySelectorAll(':scope > .rq').forEach(x => x.remove());
+    const c = l.querySelector(':scope > input:not([type=radio]):not([type=checkbox]), :scope > select, :scope > textarea');
+    if (!c || !c.required) return;
+    const n = [...l.childNodes].find(x => (x.nodeType === 3 && x.textContent.trim()) || (x.nodeType === 1 && x.tagName === 'SPAN'));
+    if (!n) return;
+    const s = document.createElement('b'); s.className = 'rq'; s.setAttribute('aria-hidden', 'true'); s.textContent = '*';
+    n.after(s);
+  });
   // Tipo de actividad: el evento privado no muestra salas (las asigna la administración) y tiene su propio límite de anticipación
   const applyKind = () => {
     const k = ed ? ed.kind : ($('[name=kind]:checked')?.value || 'group'), priv = k === 'private', noRooms = priv && !S.admin;
     S.kind = k;
     $('#grpbox').hidden = noRooms; $('#pvbox').hidden = !noRooms; $('#dtlbox').hidden = !priv;
     if ($('#pvnote')) $('#pvnote').hidden = !noRooms;
+    $('#ppl').textContent = priv ? 'Nombre del evento' : 'Nombre de la actividad';
     $('#pp').placeholder = priv ? 'ej. Boda familia Mora' : 'ej. Reunión grupo G-66';
     $('#phelp').textContent = priv ? 'Escriba qué evento es y quién lo realiza.' : 'Escriba qué actividad es y qué grupo la realiza.';
     if ($('#rp')) { $('.rpb').hidden = priv; if (priv && $('#rp').checked) { $('#rp').checked = false; $('#rp').onchange(); } }
@@ -404,7 +416,7 @@ function newView() {
   ['dt','t1','t2'].forEach(i => $('#' + i).onchange = avail);
   $('#f').onsubmit = guard('Verificando disponibilidad…', submit);
   if ($('#rp')) {
-    const rpSync = () => { const on = $('#rp').checked; $('#rpf').hidden = !on; $('#rpn').hidden = !on; $('#ru').required = on; $('#ru').min = $('#dt').value || ''; };
+    const rpSync = () => { const on = $('#rp').checked; $('#rpf').hidden = !on; $('#rpn').hidden = !on; $('#ru').required = on; $('#ru').min = $('#dt').value || ''; star(); };
     $('#rp').onchange = () => { rpSync(); updateSummary(); }; $('#dt').addEventListener('change', rpSync);
   }
   if ($('#ob')) $('#ob').onchange = () => {
@@ -415,7 +427,7 @@ function newView() {
     if (on) $('#nm').focus();
   };
   document.querySelectorAll('[name=kind]').forEach(x => x.onchange = applyKind);
-  applyKind();
+  applyKind(); star();
   if (ed && ed.kind !== 'private') avail();
 }
 const dnoteText = k => 'Puede reservar con hasta ' + maxDays(k) + ' días de anticipación (hasta el ' + dayLimit(k).toLocaleDateString('es-CR', {day: 'numeric', month: 'long', year: 'numeric'}) + ').';
