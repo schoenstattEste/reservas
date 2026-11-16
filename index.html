@@ -103,7 +103,7 @@ details.bg{padding-top:8px;padding-bottom:8px}details.bg[open]>summary{margin-bo
 .logo-sm{width:32px;height:32px;object-fit:contain;vertical-align:middle;margin-right:8px}
 @media(prefers-color-scheme:dark){.brand img,.logo-sm{background:#fff;border-radius:12px;padding:4px}}
 input[type=radio]{display:inline-block;width:auto;margin:0}
-.gx{margin:6px 0 10px}.gx .q{display:block;margin-bottom:6px;font-size:.9rem;color:var(--mut)}.gx .q b{color:var(--bad)}.rq{color:var(--bad);font-weight:700;margin-left:3px}.reqn{font-size:.78rem;color:var(--mut);margin:0 0 8px}.reqn b{color:var(--bad)}.gx .opts{display:grid;grid-template-columns:1fr;gap:8px}
+.gx{margin:6px 0 10px}.gx .q{display:block;margin-bottom:6px;font-size:.9rem;color:var(--mut)}.gx .q b{color:var(--bad)}.chip .occ{display:block;font-size:.74rem;color:var(--mut);font-weight:400;white-space:normal;margin-top:2px}.rq{color:var(--bad);font-weight:700;margin-left:3px}.reqn{font-size:.78rem;color:var(--mut);margin:0 0 8px}.reqn b{color:var(--bad)}.gx .opts{display:grid;grid-template-columns:1fr;gap:8px}
 .gx .o{display:grid;grid-template-columns:auto 1fr;column-gap:10px;align-items:center;margin:0;padding:10px 12px;border:1.5px solid var(--line);border-radius:12px;background:var(--card);cursor:pointer;line-height:1.25;color:var(--ink)}
 .gx .o input{grid-row:1/3;width:20px;height:20px;accent-color:var(--ac)}.gx .o strong{font-size:1rem}.gx .o span{font-size:.8rem;color:var(--mut)}
 .gx .o:has(input:checked){border-color:var(--gold);box-shadow:0 0 0 2px color-mix(in srgb,var(--gold) 30%,transparent);background:color-mix(in srgb,var(--gold) 10%,var(--card))}
@@ -111,7 +111,7 @@ input[type=radio]{display:inline-block;width:auto;margin:0}
 .pv{display:inline-block;font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:99px;background:var(--gold);color:#010066;white-space:nowrap}
 .gh{display:flex;align-items:center;gap:8px;margin:14px 0 6px;font-size:1rem}.gh .n{font-size:.75rem;font-weight:700;padding:1px 8px;border-radius:99px;background:var(--line);color:var(--ink)}
 .gh.pr{padding-left:8px;border-left:5px solid var(--gold)}.hint{font-size:.78rem;color:var(--mut);margin:-2px 0 6px}
-.chip.na{opacity:.55}.assign{margin:8px 0}
+.chip.na{opacity:.55}.assign .chip.na{display:block;margin:0 0 8px}.assign{margin:8px 0}
 label.sw{display:flex;align-items:center;gap:10px;color:var(--ink);font-size:1rem}
 .sw input{appearance:none;-webkit-appearance:none;width:44px;height:26px;margin:0;border-radius:99px;background:var(--line);position:relative;cursor:pointer;flex:none;border:0;padding:0}
 .sw input::after{content:'';position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .15s}
@@ -252,8 +252,17 @@ async function loadAssign(box) {
   if (!box.dataset.init) { box.dataset.init = 1; (r.reservation_items || []).forEach(i => keep.add(i.space_id)); }
   const act = S.spaces.filter(x => x.active);
   const st = await Promise.all(act.map(x => sb.rpc('check_availability_for', {p_space: x.id, p_start: s, p_end: e, p_exclude: id}).then(q => q.data)));
+  // Quién ocupa cada espacio en ese periodo (solo lo ve la administración, aquí)
+  const occ = {};
+  try {
+    const [ri, rb] = await Promise.all([
+      sb.from('reservation_items').select('space_id, starts_at, ends_at, reservations(requester_name, purpose)').eq('blocking', true).neq('reservation_id', id).lt('starts_at', e).gt('ends_at', s),
+      sb.from('blackouts').select('space_id, starts_at, ends_at, reason').lt('starts_at', e).gt('ends_at', s)]);
+    (ri.data || []).forEach(x => (occ[x.space_id] = occ[x.space_id] || []).push(esc([x.reservations?.requester_name, x.reservations?.purpose].filter(Boolean).join(' · ')) + ' · ' + esc(rango(x))));
+    (rb.data || []).forEach(x => (occ[x.space_id] = occ[x.space_id] || []).push('Bloqueo por periodo' + (x.reason ? ' (' + esc(x.reason) + ')' : '') + ' · ' + esc(rango(x))));
+  } catch (_) { /* sin el detalle, la lista funciona igual */ }
   box.innerHTML = act.map((x, i) => { const ok = st[i] === 'available';
-    return `<label class="chip ${ok ? '' : 'na'}"><input type="checkbox" value="${x.id}" ${ok && keep.has(x.id) ? 'checked' : ''} ${ok ? '' : 'disabled'}>${esc(x.name)}${x.kind === 'room' && x.capacity ? ' (' + x.capacity + ' pers.)' : ''}${ok ? '' : ' — no disponible'}</label>`; }).join('')
+    return `<label class="chip ${ok ? '' : 'na'}"><input type="checkbox" value="${x.id}" ${ok && keep.has(x.id) ? 'checked' : ''} ${ok ? '' : 'disabled'}>${esc(x.name)}${x.kind === 'room' && x.capacity ? ' (' + x.capacity + ' pers.)' : ''}${ok ? '' : ' — no disponible'}${!ok && occ[x.id] ? '<small class="occ">Ocupado: ' + occ[x.id].slice(0, 3).join('; ') + '</small>' : ''}</label>`; }).join('')
     || '<small class="muted">No hay espacios habilitados.</small>';
 }
 const feats = s => { const f = (s.space_features || []).map(x => x.features.name + (x.detail ? ' ' + x.detail : '')).join(', '); return f ? ' · ' + esc(f) : ''; };
@@ -354,19 +363,22 @@ function newView() {
   <div class="g"><label><span id="nml">Nombre completo</span><input id="nm" required value="${esc(p.full_name)}"></label>
   <label>Teléfono<input id="ph" required value="${esc(p.phone)}"></label></div>
   ${S.root && !ed ? '<label id="eml" hidden>Correo de la persona (opcional, para enviarle la confirmación)<input type="email" id="emx" autocomplete="off" placeholder="ejemplo@correo.com"></label>' : ''}
-  <div class="g"><label>Fecha<input type="date" id="dt" required min="${loc(new Date()).slice(0, 10)}" ${S.admin ? '' : `max="${loc(dayLimit(ed?.kind || 'group')).slice(0, 10)}"`} value="${sd.slice(0, 10)}"></label><label>Hora de inicio<input type="time" id="t1" required value="${sd.slice(11, 16)}"></label>
-  <label>Hora de fin<input type="time" id="t2" required value="${ee.slice(11, 16)}"></label><label>Cantidad de asistentes<input type="number" id="at" inputmode="numeric" min="1" step="1" placeholder="ej. 12" ${S.admin ? '' : 'required'} value="${ed?.attendees ?? ''}"></label></div>
-  ${S.admin ? '' : `<small class="muted" id="dnote" style="display:block;font-size:.78rem;margin:-4px 0 8px">${dnoteText(ed?.kind || 'group')}</small>`}
-  ${S.root && !ed ? `<div class="rpb"><label class="obh"><input type="checkbox" id="rp"> <b>Repetir esta reserva</b></label>
-  <div class="g" id="rpf" hidden><label>Se repite<select id="re"><option value="1">Cada semana</option><option value="2">Cada 2 semanas</option></select></label>
-  <label>Hasta el<input type="date" id="ru"></label></div>
-  <p class="muted" id="rpn" hidden><small>Se repite el mismo día de la semana y a la misma hora. Abajo se muestra la disponibilidad de la primera fecha; las demás se revisan al continuar y las que choquen se omiten.</small></p></div>` : ''}
   ${!ed && S.cfg.private_enabled ? `<div class="gx"><span class="q" id="kq">¿Qué tipo de actividad es?${S.admin ? '' : ' <b>*</b>'}</span><div class="opts" role="radiogroup" aria-labelledby="kq">
   <label class="o"><input type="radio" name="kind" value="group" ${S.admin ? 'checked' : 'required'}><strong>Actividad de grupos</strong><span>Reunión, vinculación, formación, taller u otra actividad propia</span></label>
   <label class="o"><input type="radio" name="kind" value="private"><strong>Evento privado</strong><span>Cumpleaños, bodas u otros eventos que no son de grupos Schoenstatt</span></label></div>
   <div class="nt" id="pvnote" hidden><b>La fecha aún no está reservada.</b> La administración revisará su solicitud, le asignará el espacio y le responderá por correo.</div></div>` : ''}
   <label><span id="ppl">Nombre de la actividad</span><input id="pp" required maxlength="${EVMAX}" placeholder="ej. Reunión grupo G-66" autocomplete="off" value="${esc(ed?.purpose)}">
   <span style="display:flex;justify-content:space-between;gap:10px;margin-top:2px"><small class="muted" id="phelp" style="font-size:.7rem">Escriba qué actividad es y qué grupo la realiza.</small><small id="pcnt" class="muted" style="font-size:.7rem;white-space:nowrap"></small></span></label>
+  <div class="g"><label><span id="dtl1">Fecha</span><input type="date" id="dt" required min="${loc(new Date()).slice(0, 10)}" ${S.admin ? '' : `max="${loc(dayLimit(ed?.kind || 'group')).slice(0, 10)}"`} value="${sd.slice(0, 10)}"></label><label>Hora de inicio<input type="time" id="t1" required value="${sd.slice(11, 16)}"></label>
+  <label id="dtel" hidden><span>Fecha de fin</span><input type="date" id="dte" value="${ee.slice(0, 10)}"></label>
+  <label>Hora de fin<input type="time" id="t2" required value="${ee.slice(11, 16)}"></label></div>
+  <small class="muted" id="dtlhelp" hidden style="display:block;font-size:.78rem;margin:-4px 0 8px">Incluya en el horario el tiempo que necesita para el montaje y el desmontaje del evento.</small>
+  ${S.admin ? '' : `<small class="muted" id="dnote" style="display:block;font-size:.78rem;margin:-4px 0 8px">${dnoteText(ed?.kind || 'group')}</small>`}
+  ${S.root && !ed ? `<div class="rpb"><label class="obh"><input type="checkbox" id="rp"> <b>Repetir esta reserva</b></label>
+  <div class="g" id="rpf" hidden><label>Se repite<select id="re"><option value="1">Cada semana</option><option value="2">Cada 2 semanas</option></select></label>
+  <label>Hasta el<input type="date" id="ru"></label></div>
+  <p class="muted" id="rpn" hidden><small>Se repite el mismo día de la semana y a la misma hora. Abajo se muestra la disponibilidad de la primera fecha; las demás se revisan al continuar y las que choquen se omiten.</small></p></div>` : ''}
+  <div class="g" style="grid-template-columns:minmax(0,1fr)"><label>Cantidad de asistentes<input type="number" id="at" inputmode="numeric" min="1" step="1" placeholder="ej. 12" ${S.admin ? '' : 'required'} value="${ed?.attendees ?? ''}"></label></div>
   <label id="dtlbox" hidden>Detalles o necesidades (opcional)<textarea id="dtl" rows="3" maxlength="500" placeholder="ej. Salón grande, montaje de mesas, uso de cocina…">${esc(ed?.details)}</textarea></label>
   <div id="grpbox"><h3 class="hd">Salas y recursos <button type="button" class="lnk" id="mapbtn" aria-expanded="false" aria-controls="mapbox" hidden>Ver mapa de la propiedad</button><span id="navlink"></span></h3>
   <div id="mapbox" hidden><a href="${MAP_URL}" target="_blank" rel="noopener"><img src="${MAP_URL}" alt="Mapa de la propiedad con la ubicación de las casas y salas" style="display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:10px"></a><small class="muted">Toque el mapa para verlo en grande.</small></div>
@@ -394,6 +406,11 @@ function newView() {
     $('#grpbox').hidden = noRooms; $('#pvbox').hidden = !noRooms; $('#dtlbox').hidden = !priv;
     if ($('#pvnote')) $('#pvnote').hidden = !noRooms;
     $('#ppl').textContent = priv ? 'Nombre del evento' : 'Nombre de la actividad';
+    // Evento privado: puede durar varios días (el horario incluye montaje y desmontaje), así que lleva fecha de inicio y de fin
+    $('#dtel').hidden = !priv; $('#dtlhelp').hidden = !priv; $('#dte').required = priv; $('#dtl1').textContent = priv ? 'Fecha de inicio' : 'Fecha';
+    if (priv && !$('#dte').value) $('#dte').value = $('#dt').value;
+    $('#dte').min = $('#dt').value || '';
+    star();
     $('#pp').placeholder = priv ? 'ej. Boda familia Mora' : 'ej. Reunión grupo G-66';
     $('#phelp').textContent = priv ? 'Escriba qué evento es y quién lo realiza.' : 'Escriba qué actividad es y qué grupo la realiza.';
     if ($('#rp')) { $('.rpb').hidden = priv; if (priv && $('#rp').checked) { $('#rp').checked = false; $('#rp').onchange(); } }
@@ -429,6 +446,7 @@ function newView() {
     $('#obn').firstChild.textContent = on ? 'La reserva queda aprobada de inmediato y la confirmación se envía a la persona (si escribe su correo). Usted la verá en "Mis reservas".' : 'Como administrador, esta reserva queda aprobada de inmediato, en cualquier sala o recurso.';
     if (on) $('#nm').focus();
   };
+  $('#dt').addEventListener('change', () => { const de = $('#dte'); de.min = $('#dt').value || ''; if (!de.value || de.value < $('#dt').value) de.value = $('#dt').value; });
   document.querySelectorAll('[name=kind]').forEach(x => x.onchange = applyKind);
   applyKind(); star();
   if (ed && ed.kind !== 'private') avail();
@@ -436,8 +454,9 @@ function newView() {
 const dnoteText = k => 'Puede reservar con hasta ' + maxDays(k) + ' días de anticipación (hasta el ' + dayLimit(k).toLocaleDateString('es-CR', {day: 'numeric', month: 'long', year: 'numeric'}) + ').';
 function range() {
   const d = $('#dt').value, a = $('#t1').value, b = $('#t2').value;
+  const d2 = !$('#dtel').hidden && $('#dte').value ? $('#dte').value : d; // solo el evento privado puede terminar en otra fecha
   if (!d || !a || !b) return [];
-  const s = new Date(d + 'T' + a), e = new Date(d + 'T' + b);
+  const s = new Date(d + 'T' + a), e = new Date(d2 + 'T' + b);
   return e > s ? [s.toISOString(), e.toISOString()] : [];
 }
 // Devuelve {id_espacio: true} para los espacios ocupados en Google Calendar, o null si no se pudo consultar
@@ -459,7 +478,7 @@ async function calendarConflicts(rid, a, b, ids) {
 }
 async function avail() {
   const [a, b] = range(), box = $('#av'), ed = S.edit;
-  if (!a) { S.av = null; box.textContent = 'Revise que la hora de fin sea posterior a la de inicio.'; $('#navlink').innerHTML = ''; updateSummary(); return; }
+  if (!a) { S.av = null; box.textContent = ($('#dtel').hidden ? 'Revise que la hora de fin sea posterior a la de inicio.' : 'Revise que la fecha y la hora de fin sean posteriores a las de inicio.'); $('#navlink').innerHTML = ''; updateSummary(); return; }
   const editAppr = ed?.status === 'approved', locked = editAppr && ed.space_locked;
   let initKeep = null;
   if (ed && !S.editInit) { S.editInit = 1; initKeep = new Set((ed.reservation_items || []).map(i => i.space_id)); }
