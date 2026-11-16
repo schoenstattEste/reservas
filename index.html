@@ -54,6 +54,11 @@ button.wn{background:var(--bad);border-color:var(--bad);color:#fff}.ap[hidden]{d
 /* Lista de salas y recursos en la solicitud: tarjetas agrupadas */
 .obh{display:flex;align-items:center;gap:8px;font-size:1.05rem;margin-bottom:2px}.obh input{width:22px;height:22px;flex:none;margin:0}.obn{margin:0 0 10px}
 .hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.hd #navlink{font-weight:400;font-size:.88rem}h2.hd button{font-size:1rem;font-weight:400}
+/* Administración > Áreas y recursos y Bloqueos: botones de acción más discretos. El relleno azul queda para guardar o aprobar */
+.aes h2.hd button{background:none;color:var(--ac);border-color:var(--ac);padding:5px 12px;font-size:.88rem}
+.aes .row button.sec{padding:5px 12px;font-size:.88rem}
+.aes form button.sec{padding:7px 14px;font-size:.92rem}
+.aes button[data-act=bx],.aes button[data-act=sx],.aes button[data-act=bd]{color:var(--bad)}
 .sec-h{display:flex;align-items:baseline;gap:8px;margin:20px 0 8px}.sec-h h4{margin:0;font-size:1.02rem;color:var(--ac)}
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
 .tile{position:relative;display:flex;flex-direction:column;gap:4px;margin:0;padding:12px;min-height:92px;background:var(--card);border:1.5px solid var(--line);border-radius:10px;color:var(--ink);font-size:1rem}
@@ -1009,7 +1014,7 @@ async function adminView() {
     return out;
   })())}</div>`;
   }
-  $('#view').innerHTML = menu + body;
+  $('#view').innerHTML = menu + (S.sub === 'esp' || S.sub === 'blq' ? '<div class="aes">' + body + '</div>' : body);
   document.querySelectorAll('details.rw[open] .pick[data-lazy]').forEach(loadAssign);
   if (S.sub === 'cfg') cfgView();
 }
